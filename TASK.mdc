@@ -1,0 +1,173 @@
+Formify Technical Assignment – Part 1
+
+Objective: Implement the frontend 3D configurator scaffolding and plan, per Part 1 of the PDF.
+
+Frontend structure (services/frontend-react)
+
+- src/state/App.store.ts
+
+  - Global UI/application store (Zustand)
+  - Holds app-level flags (activeConfigurator, ui toggles), selections, shared settings
+  - Exposes typed selectors and actions
+
+- src/state/Config.ts
+
+  - Central static configuration
+  - Export const MIN_SPACING = { shelves: number, columns: number }
+  - Any other cross-module constants (default sizes, limits, materials registry keys)
+
+- src/scenes/ProductCanvas.tsx
+
+  - Generic Three.js canvas wrapper using React Three Fiber
+  - Include Drei CameraControls for orbit/pan/dolly
+  - Enable color management, physicallyCorrectLights, and soft shadows
+  - Provide scene lighting (key, fill, rim) and ground with realistic shadow receiver
+  - Composition slot for configurator modules via children
+
+- src/scenes/createNewConfiguratorModule.ts
+
+  - Export a factory function to create a Zustand store for a generic furniture module
+  - Generic state fields: width, height, depth, columns[], shelves[]
+  - Columns: positions (x), width; Shelves: positions (y)
+  - Materials registry keys (ids) if needed by generic visuals
+  - Constraints: min/max dimensions, counts, and MIN_SPACING enforcement helpers
+  - Pure, extendable API: add/remove/move columns/shelves
+  - Utility calculators: bounding boxes, snapping helpers, and overlap detection
+
+- src/scenes/Configurators/
+
+  - Shelf.tsx: generic shelf segment (x0→x1 span); casts/receives shadows
+  - Column.tsx: generic column segment (y0→y1 span)
+  - Frame.tsx: outer borders (left/right/top/bottom) with configurable thickness
+  - useDragShelf.ts: vertical drag logic with span-aware spacing checks
+  - useDragColumn.ts: horizontal drag logic with span-aware spacing checks
+  - spacing.ts: span-aware clamp/resolve utilities using Config.MIN_SPACING
+
+- src/scenes/Configurators/Wardrobe/
+  - index.tsx (WardrobeConfigurator)
+    - Creates a derived wardrobe store using the generic module store (extends with wardrobe-specific properties such as doors)
+    - Renders wardrobe-specific parts (e.g., doors) and composes with generic Shelf/Column from Configurators root
+    - Uses `@use-gesture/react` to drag shelves/columns interactively via generic hooks
+    - Enforces MIN_SPACING by clamping movement to limits
+  - Wardrobe.store.ts: derived Zustand store adding wardrobe-only state (e.g., doors, door types/materials)
+  - Doors.tsx: wardrobe-specific door panels driven by the derived store
+
+Data and state contracts
+
+- Generic Module Store (created by factory)
+  - State
+    - dimensions: { width: number; height: number; depth: number }
+    - frame: { thickness: number }
+    - columns: Array<{ id: string; x: number; width: number; y0: number; y1: number }>
+    - shelves: Array<{ id: string; y: number; x0: number; x1: number }>
+    - materials: Record<string, { name: string; color?: string; mapUrl?: string }>
+  - Actions
+    - setDimensions(next)
+    - setFrame(next)
+    - addColumn({ x, width, y0, y1 }) / removeColumn(id)
+    - moveColumn(id, nextX)
+    - resizeColumnSpan(id, nextY0, nextY1)
+    - addShelf({ y, x0, x1 }) / removeShelf(id)
+    - moveShelf(id, nextY)
+    - resizeShelfSpan(id, nextX0, nextX1)
+    - registerMaterial(key, def)
+  - Selectors
+    - orderedColumns, orderedShelves
+    - neighborsWithinSpan
+    - frameAwareClamp helpers
+
+Drag and spacing rules (use-gesture)
+
+- Shelves (vertical): clamp against shelves whose x-range overlaps [x0,x1] and frame top/bottom >= MIN_SPACING.shelves
+- Columns (horizontal): clamp against columns whose y-range overlaps [y0,y1] and frame left/right >= MIN_SPACING.columns
+- Overlap prevention: clamp to the nearest valid limit instead of cancelling
+- Kinematics: smooth updates with requestAnimationFrame and store actions; keep UI responsive
+
+Rendering guidelines
+
+- Use rem in DOM overlays; 3D scene uses meters always
+- Render visible outer frame/borders using `frame.thickness`; shelves/columns must not intersect frame
+- Shelves and columns are segments (shelves x0→x1 at y; columns y0→y1 at x), not full spans by default
+- Enable soft, realistic shadows; avoid heavy performance costs by tuning shadow maps
+- Keep components generic; wardrobe specifics live in its folder while reusing generic store
+
+Integration plan
+
+1. Add dependency `@use-gesture/react`
+
+   - Action: add the package in `services/frontend-react` only.
+   - Validation: lockfile updated; no code changes yet.
+
+2. Create `src/state/Config.ts` with `MIN_SPACING`
+
+   - Action: create file exporting:
+     - `export const MIN_SPACING = { shelves: number, columns: number }`
+     - Named constants for defaults (e.g., default dimensions), optional materials registry keys.
+   - Validation: TypeScript types are explicit; no side effects.
+
+3. Create global `src/state/App.store.ts`
+
+   - Action: define a Zustand store for app-level concerns:
+     - `activeConfigurator?: 'wardrobe' | 'bookcase' | null`
+     - `ui: { showGrid: boolean; showHelpers: boolean }`
+     - Actions: `setActiveConfigurator`, `toggleUiFlag(key)`
+   - Validation: store compiles; no consumers yet.
+
+4. Add `src/scenes/ProductCanvas.tsx` and mount in `App.tsx`
+
+   - Action: implement a reusable scene shell:
+     - R3F `<Canvas>` with color management and soft shadows enabled.
+     - Lighting rig (key/fill/rim) and ground plane receiving shadows.
+     - Drei `CameraControls` configured for orbit/pan/dolly; sensible defaults.
+     - Render `props.children` to host configurators.
+   - Wiring: update `App.tsx` to render `ProductCanvas` placeholder-only (no module yet).
+   - Validation: app runs, blank scene visible.
+
+5. Implement module store factory `src/scenes/createNewConfiguratorModule.ts`
+
+   - Action: export a function `createModuleStore<T extends ModuleOptions>(defaults)` returning a typed Zustand store instance.
+   - Include generic state: dimensions, `columns[]`, `shelves[]`, `materials`.
+   - Include actions: add/remove/move columns/shelves with spacing checks; set dimensions; register materials.
+   - Include selectors/helpers: ordered arrays; nearest-neighbor lookup; clamp functions using `MIN_SPACING`.
+   - Validation: unit-like type checks; no 3D rendering dependency.
+
+6. Scaffold Wardrobe module under `src/scenes/Configurators/Wardrobe/`
+
+   - Action: in `src/scenes/Configurators/`, add generic `Shelf.tsx` (segment), `Column.tsx` (segment), `Frame.tsx`, `useDragShelf.ts`, `useDragColumn.ts`, and span-aware `spacing.ts`.
+   - Action: in `src/scenes/Configurators/Wardrobe/`, add `Wardrobe.store.ts` (derived store with doors), `Doors.tsx`, and `index.tsx` composing `Frame`, segmented shelves and columns per store.
+   - Validation: components compile; no runtime drag yet.
+
+7. Connect WardrobeConfigurator into `ProductCanvas`
+
+   - Action: in `App.tsx`, render `<ProductCanvas><WardrobeConfigurator /></ProductCanvas>` gated by `activeConfigurator` or unconditionally for the prototype.
+   - Validation: scene shows static wardrobe elements at default positions.
+
+8. Implement drag interactions with spacing enforcement
+
+   - Action: in `useDragShelf` / `useDragColumn`, on drag update:
+     - Compute desired next position from gesture delta.
+     - Clamp using span-aware helpers and `MIN_SPACING` (respect neighbors within overlapping spans and frame).
+     - Apply via store `moveShelf` / `moveColumn`.
+   - UX: add inertial feel only if it cannot violate constraints; otherwise snap.
+   - Validation: shelves/columns do not overlap and stay within boundaries.
+
+9. Implement hover/selection/outline and cursor
+
+   - Action: in `Shelf.tsx` and `Column.tsx`, add pointer events to set hovered/selected ids in store; apply outline overlay or Drei `Outlines` for hover.
+   - Action: set cursor to `grab` on hover and `grabbing` on drag.
+   - Validation: hover shows outline + cursor change; dragging updates positions.
+
+10. Add floating panel and SVG
+
+- Action: create `src/layout/PanelConfigurator.tsx` with inputs bound to global/module store; render `FrontViewSVG` (live front-view representation).
+- Wiring: overlay the panel on top-right in `App.tsx`.
+- Validation: changes in inputs update the scene and vice-versa.
+
+README updates
+
+- `README.mdc` includes a high-level overview; this file holds the detailed plan.
+
+Notes
+
+- Follow latest TypeScript and ESLint rules
+- Use rem in DOM; keep code clean and legible

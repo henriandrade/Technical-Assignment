@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  frontend-react:
+    container_name: formify_frontend
+    image: formify/frontend:dev
+    build:
+      context: ./services/frontend-react
+      dockerfile: ../../infra/docker/Dockerfile.frontend
+    command: bun run dev
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
+      - VITE_HOST=0.0.0.0
+    working_dir: /usr/src/app
+    volumes:
+      - ./services/frontend-react:/usr/src/app:delegated
+      - frontend_node_modules:/usr/src/app/node_modules
+    depends_on:
+      - backend-express
+
+  backend-express:
+    container_name: formify_backend
+    image: formify/backend:dev
+    build:
+      context: ./services/backend-express
+      dockerfile: ../../infra/docker/Dockerfile.backend
+    command: bun run dev
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=${DATABASE_URL}
+    working_dir: /usr/src/app
+    volumes:
+      - ./services/backend-express:/usr/src/app:delegated
+      - backend_node_modules:/usr/src/app/node_modules
+    depends_on:
+      - db
+
+  db:
+    container_name: formify_db
+    image: postgres:16
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-formify}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
+  frontend_node_modules:
+  backend_node_modules:

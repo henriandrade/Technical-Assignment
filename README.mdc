@@ -1,0 +1,306 @@
+# Formify Assignment Monorepo
+
+This repository uses the latest stable React, Three.js, React Three Fiber, React Three Drei, strict TypeScript, Express, and PostgreSQL; all wrapped in a Dockerized development workflow with hot reload.
+
+## Tech stack
+
+- Frontend
+  - React (latest) with Vite
+  - Three.js (latest)
+  - React Three Fiber (latest)
+  - React Three Drei (latest)
+  - Tailwind CSS (latest)
+  - TypeScript (strict mode)
+  - Zustand for state management
+  - ESLint (latest rules) + Prettier (formatting)
+- Backend
+  - Node.js (LTS)
+  - Express (latest)
+  - PostgreSQL (latest stable)
+  - `pg` client (swap for an ORM if desired later)
+  - Zod (optional) for request/response validation
+- Tooling
+  - Bun workspaces (monorepo)
+  - Docker + Docker Compose
+  - Hot reload in dev: Vite for frontend, ts-node-dev for backend
+
+## Monorepo layout
+
+```
+.
+├─ services/
+│  ├─ frontend-react/     # Vite + React + R3F + Drei + TS (strict) + Zustand + Tailwind
+│  │  ├─ public/
+│  │  ├─ src/
+│  │  │  ├─ layout/       # DOM layout components (headers, panels, UI shells)
+│  │  │  ├─ style/        # styling files (tailwind.css, globals.css, tokens)
+│  │  │  ├─ scenes/       # R3F canvases, scene graphs, loaders
+│  │  │  │  ├─ ProductCanvas.tsx
+│  │  │  │  ├─ createNewConfiguratorModule.ts
+│  │  │  │  └─ Configurators/
+│  │  │  │     ├─ Shelf.tsx           # segment-based (x0→x1)
+│  │  │  │     ├─ Column.tsx          # segment-based (y0→y1)
+│  │  │  │     ├─ Frame.tsx           # visible borders using frame.thickness
+│  │  │  │     ├─ FrontViewSVG.tsx    # lightweight SVG front view
+│  │  │  │     └─ Wardrobe/    # product-specific extension (doors, derived store)
+│  │  │  ├─ state/        # Zustand stores (includes App.store.ts, Config.ts)
+│  │  │  ├─ lib/          # utilities (units in rem, etc.)
+│  │  │  ├─ App.tsx       # mounts ProductCanvas and feature configurators
+│  │  │  └─ main.tsx
+│  │  ├─ tailwind.config.ts
+│  │  ├─ tsconfig.json
+│  │  └─ vite.config.ts
+│  └─ backend-express/    # Express + TS + Postgres
+│     ├─ src/
+│     │  ├─ index.ts      # app bootstrap
+│     │  ├─ server.ts     # Express server wiring
+│     │  ├─ routes/       # route definitions
+│     │  ├─ controllers/  # route handlers
+│     │  ├─ services/     # business logic
+│     │  ├─ db/           # db client, migrations (if using)
+│     │  └─ schemas/      # zod validators
+│     ├─ tsconfig.json
+│     └─ nodemon.json
+├─ infra/
+│  ├─ docker/             # Dockerfiles for frontend/backend
+│  └─ scripts/            # helper scripts
+├─ .env.example           # root-level env fan-out to services
+├─ docker-compose.yml     # dev orchestration with hot reload
+├─ package.json           # workspaces + root scripts
+├─ tsconfig.base.json     # strict TS base config
+├─ .eslintrc.cjs          # latest ESLint rules
+└─ README.mdc             # this file
+```
+
+Notes:
+
+- Avoid a root-level `components/`; prefer descriptive, feature-scoped folders (e.g., `layout/`, `scenes/`, or inside specific feature dirs).
+- No shared packages are used in this scaffold to keep service boundaries clear.
+
+## Environment variables
+
+Create environment files per app. The root `.env` is optional but helpful to keep values in one place.
+
+- Root `.env` (copied from `.env.example`):
+
+```
+# Common
+NODE_ENV=development
+# Postgres (Compose defaults)
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=formify
+POSTGRES_PORT=5432
+POSTGRES_HOST=db
+DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+# Ports
+API_PORT=3000
+WEB_PORT=5173
+# Frontend
+VITE_API_URL=http://localhost:${API_PORT}
+```
+
+- `services/backend-express/.env`:
+
+```
+NODE_ENV=development
+PORT=3000
+DATABASE_URL=postgresql://postgres:postgres@db:5432/formify
+```
+
+- `services/frontend-react/.env`:
+
+```
+VITE_API_URL=http://localhost:3000
+```
+
+## Dockerized development
+
+Hot reload is enabled via bind mounts and dev commands. Node modules are volume-mounted to keep host clean and speed up installs.
+
+`docker-compose.yml` (actual services):
+
+```yaml
+version: "3.9"
+
+services:
+  frontend-react:
+    build:
+      context: ./services/frontend-react
+      dockerfile: ../../infra/docker/Dockerfile.frontend
+    command: bun run dev
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
+    working_dir: /usr/src/app
+    volumes:
+      - ./services/frontend-react:/usr/src/app:delegated
+      - frontend_node_modules:/usr/src/app/node_modules
+    depends_on:
+      - backend-express
+
+  backend-express:
+    build:
+      context: ./services/backend-express
+      dockerfile: ../../infra/docker/Dockerfile.backend
+    command: bun run dev
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=${DATABASE_URL}
+    working_dir: /usr/src/app
+    volumes:
+      - ./services/backend-express:/usr/src/app:delegated
+      - backend_node_modules:/usr/src/app/node_modules
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-formify}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
+  frontend_node_modules:
+  backend_node_modules:
+```
+
+Dockerfiles (actual):
+
+- `infra/docker/Dockerfile.frontend`
+
+```dockerfile
+FROM oven/bun:1
+WORKDIR /usr/src/app
+COPY package.json bun.lockb* ./
+RUN bun install || true
+COPY . .
+EXPOSE 5173
+CMD ["bun", "run", "dev"]
+```
+
+- `infra/docker/Dockerfile.backend`
+
+```dockerfile
+FROM oven/bun:1
+WORKDIR /usr/src/app
+COPY package.json bun.lockb* ./
+RUN bun install || true
+COPY . .
+EXPOSE 3000
+CMD ["bun", "run", "dev"]
+```
+
+## TypeScript (strict) and ESLint
+
+- Base TS config `tsconfig.base.json`:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "baseUrl": "."
+  }
+}
+```
+
+## Root workspace scripts (Bun)
+
+`package.json` (conceptual excerpt):
+
+```json
+{
+  "name": "formify-assignment-monorepo",
+  "private": true,
+  "packageManager": "bun@1.1.20",
+  "workspaces": ["services/*"],
+  "scripts": {
+    "dev": "echo 'Use docker compose up --build for dev'",
+    "build": "echo 'Use service-level builds'",
+    "lint": "echo 'Run lint per service'",
+    "typecheck": "echo 'Run typecheck per service'"
+  }
+}
+```
+
+Each service defines its own `dev`, `build`, `lint`, and `typecheck` scripts. Use Docker Compose for unified dev.
+
+## Installation & running
+
+### Prerequisites
+
+- Docker Desktop or Docker Engine + Docker Compose
+- Bun (for optional local dev): `curl -fsSL https://bun.sh/install | bash`
+
+### 1) Clone and bootstrap
+
+```
+git clone <this-repo-url> formify
+cd formify
+cp .env.example .env
+```
+
+Optionally duplicate envs into `services/frontend-react/.env` and `services/backend-express/.env` as shown above.
+
+### 2) Run with Docker (recommended)
+
+```
+docker compose up --build
+```
+
+- Frontend: http://localhost:5173
+- API: http://localhost:3000
+- Postgres: localhost:5432 (db=formify, user=postgres, pw=postgres)
+
+Hot reload notes:
+
+- Frontend uses Vite `--host` and a bind mount; changes in `services/frontend-react` trigger instant HMR.
+- Backend uses ts-node-dev; changes in `services/backend-express` restart the server automatically.
+
+### 3) Run locally without Docker (optional)
+
+```
+# Install deps
+bun install
+# Frontend
+cd services/frontend-react && bun run dev
+# Backend (in a separate shell)
+cd services/backend-express && bun run dev
+```
+
+- You must have a local Postgres running and set `DATABASE_URL` env for the backend.
+
+## Frontend specifics
+
+- Use `rem` units instead of absolute `px` for sizing and spacing.
+- Zustand is used for global UI/scene state.
+- React Three Fiber/Drei manage the canvas and helpers; Three.js is the rendering core.
+
+## Backend specifics
+
+- Express serves JSON APIs and connects to Postgres via `pg`.
+- Validation recommended with Zod for request bodies and responses.
+- Consider adding an ORM (e.g., Prisma/Drizzle) later for schema migrations and type-safe queries.
+
+## Conventions
+
+- TypeScript: strict mode enabled across all packages.
+- Linting: latest ESLint rules; keep code clean and legible.

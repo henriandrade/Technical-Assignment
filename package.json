@@ -1,0 +1,14 @@
+{
+  "name": "formify-assignment-monorepo",
+  "private": true,
+  "packageManager": "bun@1.1.20",
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "echo 'Use docker compose up --build for dev'",
+    "build": "echo 'Use service-level builds'",
+    "typecheck": "echo 'Run typecheck per service'",
+    "lint": "echo 'Run lint per service'"
+  }
+}
