@@ -9,4 +9,8 @@ export const DEFAULT_DIMENSIONS = {
     depth: 0.6, // meters
 } as const;
 
-
+// Default camera angle only (direction), other camera logic lives in scenes/CameraManager.tsx
+export const DEFAULT_CAMERA_ANGLE = {
+    azimuthDeg: 30,
+    polarDeg: 75,
+} as const;

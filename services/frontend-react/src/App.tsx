@@ -19,7 +19,7 @@ export default function App() {
 
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
-      <ProductCanvas onPointerMissed={clearSelection}>
+      <ProductCanvas moduleStore={store} onPointerMissed={clearSelection}>
         <WardrobeConfigurator store={store} />
       </ProductCanvas>
       <PanelConfigurator store={store} />
