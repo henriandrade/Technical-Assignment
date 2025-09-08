@@ -30,6 +30,7 @@ export function DraggableInput({
   const dragStartX = useRef<number | null>(null);
   const startValue = useRef<number>(value);
   const restoreUserSelect = useRef<string>("");
+  const trackRef = useRef<HTMLDivElement | null>(null);
 
   const clamp = useCallback(
     (v: number) => Math.max(min, Math.min(max, v)),
@@ -52,20 +53,49 @@ export function DraggableInput({
       document.body.style.cursor = "ew-resize";
       restoreUserSelect.current = document.body.style.userSelect;
       document.body.style.userSelect = "none";
+      const hasBounds =
+        Number.isFinite(min) &&
+        Number.isFinite(max) &&
+        (max as number) > (min as number);
+      if (hasBounds && trackRef.current) {
+        const rect = trackRef.current.getBoundingClientRect();
+        const nx = Math.max(
+          0,
+          Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width))
+        );
+        const nextValue =
+          (min as number) + nx * ((max as number) - (min as number));
+        onChange(clamp(nextValue));
+      }
     },
-    [value, isEditing]
+    [value, isEditing, min, max, onChange, clamp]
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (dragStartX.current == null) return;
       e.preventDefault();
-      const dx = e.clientX - dragStartX.current;
+      const hasBounds =
+        Number.isFinite(min) &&
+        Number.isFinite(max) &&
+        (max as number) > (min as number);
+      if (hasBounds && trackRef.current) {
+        const rect = trackRef.current.getBoundingClientRect();
+        const nx = Math.max(
+          0,
+          Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width))
+        );
+        const nextValue =
+          (min as number) + nx * ((max as number) - (min as number));
+        onChange(clamp(nextValue));
+        return;
+      }
+      const dx = e.clientX - (dragStartX.current as number);
       const factor = dragPerPixel ?? step;
       const delta = dx * factor; // pixels * factor
       onChange(clamp(startValue.current + delta));
     },
-    [onChange, clamp, step, dragPerPixel]
+    [onChange, clamp, step, dragPerPixel, min, max]
   );
 
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -113,14 +143,27 @@ export function DraggableInput({
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: label ? "1fr auto" : "auto",
-        alignItems: "center",
-        gap: "0.5rem",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.25rem",
         fontSize: "0.875rem",
+        minWidth: 0,
       }}
     >
-      {label && <div style={{ color: "#475569" }}>{label}</div>}
+      {label && (
+        <div
+          style={{
+            color: "#475569",
+            fontSize: "0.625rem",
+            lineHeight: 1.1,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {label}
+        </div>
+      )}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -130,8 +173,9 @@ export function DraggableInput({
           setIsEditing(true);
         }}
         style={{
-          minWidth: "6rem",
-          padding: "0.375rem 0.5rem",
+          width: "100%",
+          minWidth: 0,
+          padding: "0.3rem 0.5rem",
           borderRadius: "0.375rem",
           background: "#f8fafc",
           border: "1px solid #e2e8f0",
@@ -140,7 +184,9 @@ export function DraggableInput({
           color: "#0f172a",
           userSelect: isEditing ? "text" : "none",
           position: "relative",
+          boxSizing: "border-box",
         }}
+        ref={trackRef}
         title={title ?? "Drag horizontally to change. Double click to type."}
       >
         {isEditing ? (
@@ -152,6 +198,7 @@ export function DraggableInput({
             onKeyDown={onKeyDown}
             style={{
               width: "100%",
+              minWidth: 0,
               outline: "none",
               background: "transparent",
               border: "none",

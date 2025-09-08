@@ -20,6 +20,7 @@ export function WardrobeConfigurator({ store: externalStore }: Props) {
   if (!storeRef.current) storeRef.current = createWardrobeStore();
   const store = storeRef.current;
   const dimensions = useStore(store, (s) => s.dimensions);
+  const frameThickness = useStore(store, (s) => s.frameThickness);
   const columns = useStore(store, (s) => s.columns);
   const shelves = useStore(store, (s) => s.shelves);
   const columnIds = useMemo(
@@ -53,7 +54,7 @@ export function WardrobeConfigurator({ store: externalStore }: Props) {
         width={dimensions.width}
         height={dimensions.height}
         depth={dimensions.depth}
-        thickness={0.02}
+        thickness={frameThickness}
         store={store}
       />
 
@@ -78,6 +79,7 @@ function DraggableColumn({
   id: string;
 }) {
   const dimensions = useStore(store, (s) => s.dimensions);
+  const frameThickness = useStore(store, (s) => s.frameThickness);
   const column = useStore(store, (s) => s.columns.find((c) => c.id === id));
   const bind = useDragColumn(store, id);
   if (!column) return null;
@@ -85,7 +87,8 @@ function DraggableColumn({
     <Column
       id={id}
       store={store}
-      height={dimensions.height}
+      height={Math.max(0, dimensions.height - 2 * frameThickness)}
+      baseY={frameThickness}
       depth={dimensions.depth}
       x={column.x}
       width={column.width}
@@ -103,6 +106,7 @@ function DraggableShelf({
 }) {
   const dimensions = useStore(store, (s) => s.dimensions);
   const shelf = useStore(store, (s) => s.shelves.find((sh) => sh.id === id));
+  const shelfThickness = useStore(store, (s) => s.shelfThickness);
   const bind = useDragShelf(store, id);
   if (!shelf) return null;
   return (
@@ -112,7 +116,7 @@ function DraggableShelf({
       width={dimensions.width}
       depth={dimensions.depth}
       y={shelf.y}
-      thickness={0.02}
+      thickness={shelfThickness}
       gesture={bind() as any}
     />
   );

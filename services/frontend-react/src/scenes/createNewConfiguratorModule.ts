@@ -22,6 +22,10 @@ export interface ModuleState {
     dimensions: ModuleDimensions;
     columns: ModuleColumn[];
     shelves: ModuleShelf[];
+    // Thickness controls (meters)
+    columnThickness: number;
+    shelfThickness: number;
+    frameThickness: number;
     materials: Record<string, { name: string; color?: string; mapUrl?: string | undefined }>;
     selectedMaterialKey: string | null;
     woodParams: {
@@ -60,6 +64,8 @@ export interface ModuleState {
         clearcoat?: number;
         clearcoatRoughness?: number;
     };
+    selectedGenus?: string;
+    selectedFinish?: string;
     hoveredId: { type: "shelf" | "column" | null; id: string | null };
     selectedId: { type: "shelf" | "column" | null; id: string | null };
 }
@@ -74,9 +80,16 @@ export interface ModuleActions {
     addShelf: (atY?: number) => void;
     removeShelf: (id: string) => void;
     moveShelf: (id: string, nextY: number) => void;
+    setColumnThickness: (value: number) => void;
+    setShelfThickness: (value: number) => void;
+    setFrameThickness: (value: number) => void;
     registerMaterial: (key: string, def: { name: string; color?: string; mapUrl?: string | undefined }) => void;
     setSelectedMaterial: (key: string) => void;
     setWoodParams: (next: Partial<ModuleState["woodParams"]>) => void;
+    applyPreset: (
+        genus: string,
+        finish: string,
+    ) => void;
     setHovered: (payload: { type: "shelf" | "column" | null; id: string | null }) => void;
     setSelected: (payload: { type: "shelf" | "column" | null; id: string | null }) => void;
 }
@@ -93,11 +106,30 @@ function clamp(value: number, min: number, max: number) {
     return Math.max(min, Math.min(max, value));
 }
 
+export function getInnerCavity(dim: ModuleDimensions, frameThickness: number) {
+    const t = Math.max(0, frameThickness);
+    const x0 = t;
+    const x1 = Math.max(t, dim.width - t);
+    const y0 = t;
+    const y1 = Math.max(t, dim.height - t);
+    return {
+        x0,
+        x1,
+        y0,
+        y1,
+        innerWidth: Math.max(0, x1 - x0),
+        innerHeight: Math.max(0, y1 - y0),
+    } as const;
+}
+
 export function createModuleStore(options: ModuleOptions) {
     return createStore<ModuleStore>()((set, get) => ({
         dimensions: options.dimensions ?? { width: 1.8, height: 2.2, depth: 0.6 },
         columns: options.columns ?? [],
         shelves: options.shelves ?? [],
+        columnThickness: (options as any)?.columnThickness ?? 0.02,
+        shelfThickness: (options as any)?.shelfThickness ?? 0.02,
+        frameThickness: (options as any)?.frameThickness ?? 0.02,
         materials: options.materials ?? {},
         selectedMaterialKey: (options as any)?.selectedMaterialKey ?? null,
         woodParams: (options as any)?.woodParams ?? {
@@ -136,6 +168,8 @@ export function createModuleStore(options: ModuleOptions) {
             clearcoat: 1,
             clearcoatRoughness: 0.2,
         },
+        selectedGenus: (options as any)?.selectedGenus ?? 'white_oak',
+        selectedFinish: (options as any)?.selectedFinish ?? 'matte',
         hoveredId: { type: null, id: null },
         selectedId: { type: null, id: null },
 
@@ -147,8 +181,12 @@ export function createModuleStore(options: ModuleOptions) {
                 const targetDepth = next.depth ?? prev.depth;
 
                 // Compute minimal feasible size based on current elements and spacing
-                const minWidth = MIN_SPACING.columns * (state.columns.length + 1) + state.columns.reduce((sum, c) => sum + c.width, 0);
-                const minHeight = MIN_SPACING.shelves * (state.shelves.length + 1);
+                const frameT = state.frameThickness;
+                const minWidth = (2 * frameT)
+                    + MIN_SPACING.columns * (state.columns.length + 1)
+                    + state.columns.reduce((sum, c) => sum + c.width, 0);
+                const minHeight = (2 * frameT)
+                    + MIN_SPACING.shelves * (state.shelves.length + 1);
                 if (targetWidth < minWidth) targetWidth = minWidth;
                 if (targetHeight < minHeight) targetHeight = minHeight;
 
@@ -158,44 +196,46 @@ export function createModuleStore(options: ModuleOptions) {
 
                 // Scale columns x positions proportionally then enforce spacing constraints
                 let scaledColumns = sortBy(state.columns.map((c) => ({ ...c, x: c.x * scaleX })), (c) => c.x);
-                // Forward pass: ensure left constraints
-                let leftEdge = MIN_SPACING.columns;
+                const { x0, x1, y0, y1 } = getInnerCavity({ width: targetWidth, height: targetHeight, depth: targetDepth }, frameT);
+                // Forward pass: ensure left constraints inside inner cavity
+                let leftEdge = x0 + MIN_SPACING.columns;
                 scaledColumns = scaledColumns.map((c) => {
-                    const maxX = targetWidth - c.width - MIN_SPACING.columns;
+                    const maxX = x1 - c.width - MIN_SPACING.columns;
                     const clampedX = clamp(c.x, leftEdge, maxX);
                     leftEdge = clampedX + c.width + MIN_SPACING.columns;
                     return { ...c, x: clampedX };
                 });
-                // Backward pass: ensure right constraints
+                // Backward pass: ensure right constraints inside inner cavity
                 for (let i = scaledColumns.length - 1; i >= 0; i -= 1) {
                     const rightNeighbor = scaledColumns[i + 1];
                     const maxAllowed = rightNeighbor
                         ? rightNeighbor.x - scaledColumns[i]!.width - MIN_SPACING.columns
-                        : targetWidth - scaledColumns[i]!.width - MIN_SPACING.columns;
+                        : x1 - scaledColumns[i]!.width - MIN_SPACING.columns;
                     const minAllowed = i > 0
                         ? scaledColumns[i - 1]!.x + scaledColumns[i - 1]!.width + MIN_SPACING.columns
-                        : MIN_SPACING.columns;
+                        : x0 + MIN_SPACING.columns;
                     scaledColumns[i] = {
                         ...scaledColumns[i]!,
                         x: clamp(scaledColumns[i]!.x, minAllowed, maxAllowed),
                     };
                 }
 
-                // Scale shelves y positions proportionally then enforce spacing constraints
+                // Scale shelves y positions proportionally then enforce spacing constraints (centered thickness)
                 let scaledShelves = sortBy(state.shelves.map((s) => ({ ...s, y: s.y * scaleY })), (s) => s.y);
                 // Forward pass: from bottom to top
-                let bottom = MIN_SPACING.shelves;
+                const shelfHalf = (state.shelfThickness ?? 0.02) / 2;
+                let bottom = y0 + shelfHalf + MIN_SPACING.shelves;
                 scaledShelves = scaledShelves.map((s) => {
-                    const topLimit = targetHeight - MIN_SPACING.shelves;
+                    const topLimit = y1 - shelfHalf - MIN_SPACING.shelves;
                     const clampedY = clamp(s.y, bottom, topLimit);
-                    bottom = clampedY + MIN_SPACING.shelves;
+                    bottom = clampedY + (2 * shelfHalf) + MIN_SPACING.shelves;
                     return { ...s, y: clampedY };
                 });
                 // Backward pass: from top to bottom
                 for (let i = scaledShelves.length - 1; i >= 0; i -= 1) {
                     const above = scaledShelves[i + 1];
-                    const maxAllowed = above ? above.y - MIN_SPACING.shelves : targetHeight - MIN_SPACING.shelves;
-                    const minAllowed = i > 0 ? scaledShelves[i - 1]!.y + MIN_SPACING.shelves : MIN_SPACING.shelves;
+                    const maxAllowed = above ? above.y - ((2 * shelfHalf) + MIN_SPACING.shelves) : y1 - shelfHalf - MIN_SPACING.shelves;
+                    const minAllowed = i > 0 ? scaledShelves[i - 1]!.y + ((2 * shelfHalf) + MIN_SPACING.shelves) : y0 + shelfHalf + MIN_SPACING.shelves;
                     scaledShelves[i] = { ...scaledShelves[i]!, y: clamp(scaledShelves[i]!.y, minAllowed, maxAllowed) };
                 }
 
@@ -208,8 +248,9 @@ export function createModuleStore(options: ModuleOptions) {
 
         setColumnsEven: (desiredCount, explicitWidth) =>
             set((state) => {
-                const W = state.dimensions.width;
-                const defaultW = state.columns[0]?.width ?? 0.02;
+                const { x0, x1 } = getInnerCavity(state.dimensions, state.frameThickness);
+                const W = x1 - x0;
+                const defaultW = state.columns[0]?.width ?? state.columnThickness ?? 0.02;
                 const colW = explicitWidth ?? defaultW;
                 const maxCount = Math.max(0, Math.floor((W - MIN_SPACING.columns) / (colW + MIN_SPACING.columns)) - 1);
                 const count = Math.max(0, Math.min(desiredCount, maxCount));
@@ -219,7 +260,7 @@ export function createModuleStore(options: ModuleOptions) {
                     (W - count * colW) / (count + 1),
                 );
                 const next: ModuleColumn[] = Array.from({ length: count }).map((_, i) => {
-                    const x = gap * (i + 1) + colW * i; // left edge
+                    const x = x0 + gap * (i + 1) + colW * i; // absolute left edge
                     return { id: crypto.randomUUID(), x, width: colW };
                 });
                 return { columns: next };
@@ -227,12 +268,14 @@ export function createModuleStore(options: ModuleOptions) {
 
         setShelvesEven: (desiredCount) =>
             set((state) => {
-                const H = state.dimensions.height;
+                const { y0, y1 } = getInnerCavity(state.dimensions, state.frameThickness);
+                const H = y1 - y0;
                 const maxCount = Math.max(0, Math.floor((H - MIN_SPACING.shelves) / MIN_SPACING.shelves) - 1);
                 const count = Math.max(0, Math.min(desiredCount, maxCount));
                 if (count === 0) return { shelves: [] };
-                const start = MIN_SPACING.shelves;
-                const end = H - MIN_SPACING.shelves;
+                const shelfHalf = (state.shelfThickness ?? 0.02) / 2;
+                const start = y0 + shelfHalf + MIN_SPACING.shelves;
+                const end = y1 - shelfHalf - MIN_SPACING.shelves;
                 const step = (end - start) / (count + 1);
                 const next: ModuleShelf[] = Array.from({ length: count }).map((_, i) => ({
                     id: crypto.randomUUID(),
@@ -257,7 +300,7 @@ export function createModuleStore(options: ModuleOptions) {
 
         moveColumn: (id, nextX) =>
             set((state) => {
-                const { width } = state.dimensions;
+                const { x0, x1 } = getInnerCavity(state.dimensions, state.frameThickness);
                 const columns = sortBy(state.columns, (c) => c.x);
                 const idx = columns.findIndex((c) => c.id === id);
                 if (idx < 0) return {};
@@ -266,10 +309,10 @@ export function createModuleStore(options: ModuleOptions) {
                 const rightNeighbor = columns[idx + 1];
                 const minX = leftNeighbor
                     ? leftNeighbor.x + leftNeighbor.width + MIN_SPACING.columns
-                    : MIN_SPACING.columns;
+                    : x0 + MIN_SPACING.columns;
                 const maxX = rightNeighbor
                     ? rightNeighbor.x - current.width - MIN_SPACING.columns
-                    : width - current!.width - MIN_SPACING.columns;
+                    : x1 - current!.width - MIN_SPACING.columns;
                 const clamped = clamp(nextX, minX, maxX);
                 const updated = columns.map((c) => (c.id === id ? { ...c, x: clamped } : c));
                 return { columns: updated };
@@ -288,21 +331,93 @@ export function createModuleStore(options: ModuleOptions) {
 
         moveShelf: (id, nextY) =>
             set((state) => {
-                const { height } = state.dimensions;
+                const { y0, y1 } = getInnerCavity(state.dimensions, state.frameThickness);
                 const shelves = sortBy(state.shelves, (s) => s.y);
                 const idx = shelves.findIndex((s) => s.id === id);
                 if (idx < 0) return {};
-                const top = height - MIN_SPACING.shelves;
-                const bottom = MIN_SPACING.shelves;
+                const shelfHalf = (state.shelfThickness ?? 0.02) / 2;
+                const top = y1 - shelfHalf - MIN_SPACING.shelves;
+                const bottom = y0 + shelfHalf + MIN_SPACING.shelves;
                 const above = shelves[idx + 1];
                 const below = shelves[idx - 1];
                 let minY = bottom;
                 let maxY = top;
-                if (below) minY = below.y + MIN_SPACING.shelves;
-                if (above) maxY = above.y - MIN_SPACING.shelves;
+                if (below) minY = below.y + (2 * shelfHalf) + MIN_SPACING.shelves;
+                if (above) maxY = above.y - (2 * shelfHalf) + - MIN_SPACING.shelves;
                 const clamped = clamp(nextY, minY, maxY);
                 const updated = shelves.map((s) => (s.id === id ? { ...s, y: clamped } : s));
                 return { shelves: updated };
+            }),
+        setColumnThickness: (value) =>
+            set((state) => {
+                const t = Math.max(0.01, Math.min(0.08, value));
+                // Update all columns to new width and reclamp using inner cavity
+                const { x0, x1 } = getInnerCavity(state.dimensions, state.frameThickness);
+                let cols = sortBy(state.columns.map((c) => {
+                    const center = c.x + c.width / 2;
+                    const desiredX = center - t / 2;
+                    return { ...c, width: t, x: desiredX };
+                }), (c) => c.x);
+                // forward pass
+                let leftEdge = x0 + MIN_SPACING.columns;
+                cols = cols.map((c) => {
+                    const maxX = x1 - c.width - MIN_SPACING.columns;
+                    const clampedX = clamp(c.x, leftEdge, maxX);
+                    leftEdge = clampedX + c.width + MIN_SPACING.columns;
+                    return { ...c, x: clampedX };
+                });
+                // backward pass
+                for (let i = cols.length - 1; i >= 0; i -= 1) {
+                    const rightNeighbor = cols[i + 1];
+                    const maxAllowed = rightNeighbor ? rightNeighbor.x - cols[i]!.width - MIN_SPACING.columns : x1 - cols[i]!.width - MIN_SPACING.columns;
+                    const minAllowed = i > 0 ? cols[i - 1]!.x + cols[i - 1]!.width + MIN_SPACING.columns : x0 + MIN_SPACING.columns;
+                    cols[i] = { ...cols[i]!, x: clamp(cols[i]!.x, minAllowed, maxAllowed) };
+                }
+                return { columnThickness: t, columns: cols };
+            }),
+
+        setShelfThickness: (value) =>
+            set(() => ({ shelfThickness: Math.max(0.01, Math.min(0.06, value)) })),
+
+        setFrameThickness: (value) =>
+            set((state) => {
+                const t = Math.max(0.005, Math.min(0.06, value));
+                // Re-clamp columns and shelves within new cavity
+                const { x0, x1, y0, y1 } = getInnerCavity(state.dimensions, t);
+                // Columns forward/backward pass
+                let cols = sortBy(state.columns, (c) => c.x);
+                let leftEdge = x0 + MIN_SPACING.columns;
+                cols = cols.map((c) => {
+                    const maxX = x1 - c.width - MIN_SPACING.columns;
+                    const clampedX = clamp(c.x, leftEdge, maxX);
+                    leftEdge = clampedX + c.width + MIN_SPACING.columns;
+                    return { ...c, x: clampedX };
+                });
+                for (let i = cols.length - 1; i >= 0; i -= 1) {
+                    const rightNeighbor = cols[i + 1];
+                    const maxAllowed = rightNeighbor ? rightNeighbor.x - cols[i]!.width - MIN_SPACING.columns : x1 - cols[i]!.width - MIN_SPACING.columns;
+                    const minAllowed = i > 0 ? cols[i - 1]!.x + cols[i - 1]!.width + MIN_SPACING.columns : x0 + MIN_SPACING.columns;
+                    cols[i] = { ...cols[i]!, x: clamp(cols[i]!.x, minAllowed, maxAllowed) };
+                }
+
+                // Shelves forward/backward pass (centered thickness)
+                const shelfHalf = (state.shelfThickness ?? 0.02) / 2;
+                let sh = sortBy(state.shelves, (s) => s.y);
+                let bottom = y0 + shelfHalf + MIN_SPACING.shelves;
+                sh = sh.map((s) => {
+                    const topLimit = y1 - shelfHalf - MIN_SPACING.shelves;
+                    const clampedY = clamp(s.y, bottom, topLimit);
+                    bottom = clampedY + (2 * shelfHalf) + MIN_SPACING.shelves;
+                    return { ...s, y: clampedY };
+                });
+                for (let i = sh.length - 1; i >= 0; i -= 1) {
+                    const above = sh[i + 1];
+                    const maxAllowed = above ? above.y - ((2 * shelfHalf) + MIN_SPACING.shelves) : y1 - shelfHalf - MIN_SPACING.shelves;
+                    const minAllowed = i > 0 ? sh[i - 1]!.y + ((2 * shelfHalf) + MIN_SPACING.shelves) : y0 + shelfHalf + MIN_SPACING.shelves;
+                    sh[i] = { ...sh[i]!, y: clamp(sh[i]!.y, minAllowed, maxAllowed) };
+                }
+
+                return { frameThickness: t, columns: cols, shelves: sh };
             }),
 
         registerMaterial: (key, def) =>
@@ -312,6 +427,20 @@ export function createModuleStore(options: ModuleOptions) {
 
         setWoodParams: (next) =>
             set((state) => ({ woodParams: { ...state.woodParams, ...next } })),
+
+        applyPreset: (genus, finish) => {
+            // Dynamic import to avoid ESM require issues and circular deps
+            void import('@/lib/tslmaterials/wood-noise/compat').then((compat) => {
+                const mapped = compat.getPresetParams(genus as any, finish as any) as Partial<ModuleState["woodParams"]>;
+                set((state) => ({
+                    selectedGenus: genus,
+                    selectedFinish: finish,
+                    woodParams: { ...state.woodParams, ...mapped },
+                }));
+            }).catch(() => {
+                set({ selectedGenus: genus, selectedFinish: finish });
+            });
+        },
 
         setHovered: (payload) => set({ hoveredId: payload }),
         setSelected: (payload) => set({ selectedId: payload }),

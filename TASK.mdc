@@ -1,84 +1,100 @@
-Wood Generator Plan (step-by-step)
+Wood Generator – New Requirements Plan (step-by-step)
 
 Objective
 
-- Match the Three.js TSL wood example appearance for "matte white_oak" (`https://threejs.org/examples/webgpu_tsl_wood.html`).
-- Apply the look consistently across all wardrobe parts using our triplanar, world-space shader.
-- Switch renderer to WebGPU with graceful WebGL fallback in `ProductCanvas.tsx`.
+- Achieve full presets parity with the official three.js WebGPU TSL wood demo presets (genuses × finishes).
+- Update the configurator UI: show a 4×10 presets grid with thumbnails, and move advanced sliders into a collapsible section (collapsed by default).
+- Default selection should be matte white_oak, matching the current look.
 
 References
 
 - three.js TSL wood example: https://threejs.org/examples/webgpu_tsl_wood.html
-- Wood TSL demo: https://boytchev.github.io/tsl-textures/online/wood.html
-- Wood TSL source: https://github.com/boytchev/tsl-textures/blob/main/src/wood.js
 
-1. Review current implementation
+Scope
 
-- Inspect `services/frontend-react/src/lib/tslmaterials/wood-noise/index.ts` for shader logic and default params.
-- Inspect scene usage in `Column.tsx`, `Shelf.tsx`, `Frame.tsx` for overrides.
-- Inspect `ModuleStore` defaults and `PanelConfigurator` clamps/wiring for `woodParams`.
+- Files mainly impacted:
+  - `services/frontend-react/src/lib/tslmaterials/wood-noise/presets.ts`
+  - `services/frontend-react/src/lib/tslmaterials/wood-noise/index.ts`
+  - `services/frontend-react/src/layout/PanelConfigurator.tsx`
+  - Store where `woodParams` live (`createNewConfiguratorModule.ts`)
 
-2. Parameter mapping to white_oak
+Presets parity in tslmaterials
 
-- ringFrequency: controls ring density; map to example’s frequency for white oak.
-- ringSharpness: ring edge hardness; use slightly above 1 for matte white oak.
-- grainScale: overall world scale; tune to reduce pattern size on large parts.
-- grainWarp: FBM-modulated ring warping; keep subtle for white oak.
-- fbmOctaves/gain/lacunarity: match example turbulence feel without heavy cost.
-- lightColor/darkColor: light tan and medium brown typical of white oak.
-- roughMin/roughMax: higher base roughness and limited range for a matte finish.
+1. Reuse official types and lists
 
-3. Defaults to apply (matte white_oak)
+   - Import/re-export `WoodNodeMaterial`, `WoodGenuses`, `Finishes` from `three/addons/materials/WoodNodeMaterial.js` (already re-exported in `index.ts`).
+   - Define `type WoodGenus` and `type WoodFinish` using the official types.
 
-- ringFrequency: 5.0
-- ringSharpness: 1.6
-- grainScale: 10.0
-- grainWarp: 0.08
-- fbmOctaves: 4
-- fbmGain: 0.5
-- fbmLacunarity: 2.1
-- lightColor: #eadcc6
-- darkColor: #9b7f62
-- roughMin: 0.6
-- roughMax: 0.76
+2. Add preset access helpers
 
-4. Code edits
+   - Add `getOfficialPresetParams(genus: WoodGenus, finish: WoodFinish)` that returns a normalized parameters object we can map to our `woodParams` (string colors converted to linear RGB triplets when needed).
+   - Add `createOfficialWoodMaterial(genus: WoodGenus, finish: WoodFinish)` that calls `WoodNodeMaterial.fromPreset(genus, finish)` and applies finish-specific overrides from store (e.g., `clearcoat`, `clearcoatRoughness`).
 
-- Update `createTriplanarWoodMaterial` defaults to values above.
-- Keep `updateTriplanarWoodMaterial` wiring; ensure uniforms update.
-- Remove one-off `{ grainScale: 3.0 }` overrides in `Column.tsx`, `Shelf.tsx`, `Frame.tsx` and rely on store defaults.
-- Add TSL wood API alignment: re-export `WoodNodeMaterial`, `WoodGenuses`, `Finishes` from `three/addons/materials/WoodNodeMaterial.js` in `tslmaterials/wood-noise/index.ts` for parity with the reference.
-- Implement minimal helper `createWoodMaterialFromPreset(genus, finish)` that returns the preset material.
-- Switch `ProductCanvas.tsx` to WebGPU via R3F `gl` prop with fallback and toneMapping parity.
+3. Populate all presets
 
-5. Store/UI
+   - Genuses (columns, 10): `teak`, `walnut`, `white_oak`, `pine`, `poplar`, `maple`, `red_oak`, `cherry`, `cedar`, `mahogany`.
+   - Finishes (rows, 4): `gloss`, `semigloss`, `matte`, `raw`.
+   - Export a structure such as `AllWoodPresets: { [finish in WoodFinish]: { [genus in WoodGenus]: Preset } }` to power the grid.
 
-- Ensure `createModuleStore` `woodParams` defaults match the values in (3).
-- Keep UI clamps in `PanelConfigurator` (ringSharpness 0–1.0 currently; expand if needed for >1.0 usage).
-- FBM octaves integer; clamp 1–5; default 4.
-- Add optional preset dropdown backed by `WoodGenuses` and `Finishes` to quickly preview looks.
+4. Mapping to our legacy TSL material (if used)
+   - Implement a mapping function from official `WoodParameters` to our `WoodNodeParams` used by `material.ts`/`nodes.ts` to keep both paths in sync.
+   - Ensure color conversion and parameter naming differences are handled (e.g., `lightGrainColor`/`darkGrainColor`, warp/ring controls).
 
-6. Verification
+Thumbnails for presets
 
-- Visual compare to `white_oak (matte)` in `https://threejs.org/examples/webgpu_tsl_wood.html`.
-- Check consistency across large and thin parts (triplanar scale uniformity).
-- Adjust only if significant drift remains; prefer store defaults rather than per-mesh overrides.
-- Verify WebGPU path runs (if supported) and WebGL fallback renders identically.
+5. Implement preview generation and caching
+   - Implement `getPresetThumbnail(genus, finish)` that creates a 64–96 px PNG data URL per preset via a small offscreen three.js render using `WoodNodeMaterial.fromPreset` on a simple plane/box, tone mapping matched to the canvas.
+   - Cache by key `${finish}:${genus}` in-memory to avoid recomputation on re-render.
+   - SSR-safe: only generate in the browser after mount; show a neutral placeholder until ready.
 
-7. Follow-ups (if time allows)
+Store updates
 
-- Add preset selector (white_oak, walnut, pine) storing named sets of params.
-- Optional small preview chip via `generateWoodPreview(params)` in panel.
-- Consider switching materials in configurators to use `WoodNodeMaterial.fromPreset` flow when we move fully to TSL nodes.
+6. Extend store to track selection and apply presets
+   - Add `selectedGenus: WoodGenus` and `selectedFinish: WoodFinish` with defaults `white_oak` and `matte`.
+   - Add `applyPreset(genus, finish)` that:
+     - Updates `selectedGenus`/`selectedFinish`.
+     - Updates `woodParams` to the official preset params (mapped to our material path) and applies finish-related surface options (`clearcoat`, `clearcoatRoughness`, `clearcoatDarken`).
+   - Keep all existing individual `woodParams` fields to allow advanced overrides post-preset.
 
-Progress
+PanelConfigurator UI
 
-- ProductCanvas now initializes WebGPU when available with WebGL fallback, tone mapping set to Neutral (WebGPU) and ACES (WebGL).
-- `tslmaterials/wood-noise/index.ts` re-exports `WoodNodeMaterial`, `WoodGenuses`, and `Finishes` from the Three.js addon and provides a helper to create preset materials. Existing triplanar material kept for backward compatibility.
-- `createTriplanarWoodMaterial` now instantiates official `WoodNodeMaterial` and `updateTriplanarWoodMaterial` updates both official and legacy materials.
-- Store `woodParams` extended with official parameters and defaults aligned with example custom material; `PanelConfigurator` updated to expose controls (centerSize, warp scales, ringBias/variance, bark/splotch, cell, clearcoat) alongside colors and roughness.
+7. Presets grid (top of the wood section)
 
-Next
+   - Above the sliders, render a 4×10 grid of thumbnails: rows = `gloss`, `semigloss`, `matte`, `raw`; columns = the 10 genuses listed above.
+   - Each cell shows the thumbnail + a small label (genus). Row headers show finishes. Use rem units and CSS grid.
+   - Clicking a cell calls `applyPreset(genus, finish)`. The currently selected cell is highlighted with a focus ring and an active border.
+   - Accessibility: each cell is a button with `aria-pressed` and keyboard navigation (arrow keys move focus within the grid; Enter/Space selects).
 
-- Optionally adopt `WoodNodeMaterial.fromPreset` in configurators to showcase presets grid similar to the reference.
-- Wire a compact GUI or panel controls mapping to store to tweak TSL parameters.
+8. Advanced sliders in a collapsible container
+
+   - Wrap the existing wood generator sliders in a `<details>`/`<summary>` or custom collapse component, default collapsed. Summary text: "Advanced wood generator".
+   - Maintain the current grid layout for sliders. Keep all clamps and steps as-is. Respect `rem` units.
+
+9. Default selection and first render
+   - On init, set default to `matte` + `white_oak` (current behavior). Ensure the initial material reflects the preset before any manual slider changes.
+
+Material application path
+
+10. Material handling
+
+- If using the official material: instantiate via `WoodNodeMaterial.fromPreset(selectedGenus, selectedFinish)` and apply store finish tweaks.
+- If using our legacy TSL material: map official params via the adapter and call `updateWoodNodeMaterialTSL` with the mapped fields.
+
+Validation and polish
+
+11. Visual checks
+
+- Compare our `matte white_oak` to the three.js demo for basic parity.
+- Sample a few combinations (e.g., `gloss teak`, `semigloss walnut`, `raw maple`) and verify thumbnails match viewport results.
+
+12. UX/QA
+
+- Grid performance (thumbnail caching working, no layout thrash).
+- Keyboard and screen reader usability of the grid and the collapsible section.
+- ESLint/TypeScript clean; no implicit any; strict null checks.
+
+Outcomes
+
+- A complete presets grid (4×10) aligned with the official demo.
+- Collapsible advanced controls, collapsed by default.
+- Default preset is `matte` + `white_oak`.

@@ -10,7 +10,7 @@ import WebGPU from "three/addons/capabilities/WebGPU.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { WebGPURenderer } from "three/webgpu";
-import { SoftShadows } from "@react-three/drei";
+import { SoftShadows, Environment } from "@react-three/drei";
 import type { StoreApi } from "zustand";
 import type { ModuleStore } from "@/scenes/createNewConfiguratorModule";
 import CameraManager from "@/scenes/CameraManager";
@@ -66,6 +66,7 @@ export default function ProductCanvas({
             try {
               const renderer = new WebGPURenderer({ canvas, antialias: true });
               renderer.setPixelRatio(1.0);
+              (renderer as any).physicallyCorrectLights = true;
               (renderer as any).__backend = "WebGPU";
               return renderer as unknown as THREE.WebGLRenderer;
             } catch (_) {
@@ -75,6 +76,7 @@ export default function ProductCanvas({
           const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
           renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
           renderer.shadowMap.enabled = true;
+          (renderer as any).physicallyCorrectLights = true;
           (renderer as any).__backend = "WebGL";
           return renderer;
         }}
@@ -101,11 +103,18 @@ export default function ProductCanvas({
               THREE.ACESFilmicToneMapping;
             (anyGl as THREE.WebGLRenderer).toneMappingExposure = 1.0;
           }
+          // Drei <Environment> will manage IBL/background in the scene tree
         }}
         onPointerMissed={handlePointerMissed}
       >
         <color attach="background" args={["#f6f7fb"]} />
-        <ambientLight intensity={0.5} />
+        <Environment
+          preset="studio"
+          background={false}
+          blur={0.5}
+          environmentIntensity={0.06}
+        />
+        <ambientLight intensity={0.15} />
         <directionalLight
           castShadow
           position={[5, 8, 5]}
@@ -121,7 +130,7 @@ export default function ProductCanvas({
           shadow-camera-top={6}
           shadow-camera-bottom={-6}
         />
-        <hemisphereLight intensity={0.35} groundColor={0xffffff} />
+        <hemisphereLight intensity={0.2} groundColor={0xffffff} />
 
         {!isWebGPU && <SoftShadows size={25} samples={20} focus={0.9} />}
 

@@ -17,10 +17,20 @@ type Props = {
   width: number;
   id?: string;
   store?: StoreApi<ModuleStore>;
+  baseY?: number;
   gesture?: Record<string, unknown>;
 };
 
-function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
+function ColumnImpl({
+  height,
+  depth,
+  x,
+  width,
+  id,
+  store,
+  baseY = 0,
+  gesture,
+}: Props) {
   const isInteractive = Boolean(id && store);
   const hovered = store
     ? useStore(store, (s) => s.hoveredId)
@@ -33,9 +43,31 @@ function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
     ? useStore(store, (s) => s.selectedMaterialKey)
     : null;
   const material = useMemo(() => createTriplanarWoodMaterial(), []);
+  const seededOffset = (key: string) => {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < key.length; i += 1) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const rand = (salt: number) => {
+      let x = (h ^ salt) >>> 0;
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      return (x >>> 0) / 4294967295;
+    };
+    const amp = 0.25;
+    const ox = (rand(0x9e3779b9) - 0.5) * 2 * amp;
+    const oy = (rand(0x85ebca6b) - 0.5) * 2 * amp;
+    const oz = (rand(0xc2b2ae35) - 0.5) * 2 * amp;
+    const angY = (rand(0x27d4eb2f) - 0.5) * 2 * 0.12;
+    const scaleJitter = 1 + (rand(0x165667b1) - 0.5) * 0.06;
+    return [ox, oy, oz, angY, scaleJitter] as const;
+  };
   const woodParams = store
     ? useStore(store, (s) => s.woodParams)
     : (null as any);
+  const initialScaleRef = useRef<number | null>(null);
   useEffect(() => {
     const isWood =
       (material as any)?.isWoodNodeMaterial === true ||
@@ -47,20 +79,28 @@ function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
       });
     }
     if (isWood && woodParams) {
-      const s = Math.max(0.01, woodParams.grainScale ?? 10.0);
+      // Apply preset parameters first in case internal setters mutate transform
+      updateTriplanarWoodMaterial(material, woodParams);
+      let s = initialScaleRef.current;
+      if (s == null) {
+        const grain = Math.max(0.01, woodParams.grainScale ?? 10.0);
+        const base = 15.0;
+        s = base / grain;
+        initialScaleRef.current = s;
+      }
       (material as any).transformationMatrix = new THREE.Matrix4().makeScale(
         s,
         s,
         s
       );
-      // Subtle random Z offset per-instance to break moiré alignment when viewed at grazing angles
-      const jitter = (id?.length ?? 0) * 0.0003;
-      (material as any).transformationMatrix = (
-        material as any
-      ).transformationMatrix.multiply(
-        new THREE.Matrix4().makeTranslation(0, 0, jitter)
-      );
-      updateTriplanarWoodMaterial(material, woodParams);
+      const key =
+        id ?? `${width.toFixed(3)}-${height.toFixed(3)}-${depth.toFixed(3)}`;
+      const [ox, oy, oz, angY, scaleJitter] = seededOffset(key);
+      const sj = s * scaleJitter;
+      (material as any).transformationMatrix = new THREE.Matrix4()
+        .makeScale(sj, sj, sj)
+        .multiply(new THREE.Matrix4().makeRotationY(angY))
+        .multiply(new THREE.Matrix4().makeTranslation(ox, oy, oz));
     } else if (woodParams) {
       updateTriplanarWoodMaterial(material, woodParams);
     }
@@ -111,7 +151,7 @@ function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
   }, [width, height, depth, outlineColor]);
 
   return (
-    <group position={[x + width / 2, height / 2, 0]}>
+    <group position={[x + width / 2, baseY + height / 2, 0]}>
       <mesh
         castShadow
         receiveShadow

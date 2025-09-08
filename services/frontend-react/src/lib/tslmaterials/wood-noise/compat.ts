@@ -2,6 +2,7 @@ import * as THREE from 'three';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { WoodNodeMaterial } from 'three/addons/materials/WoodNodeMaterial.js';
+import type { WoodGenus, WoodFinish } from 'three/examples/jsm/materials/WoodNodeMaterial';
 import { createWoodNodeMaterialTSL, updateWoodNodeMaterialTSL } from './material';
 
 // Backward compatible params (legacy) + Extended params following WoodNodeMaterial
@@ -43,6 +44,8 @@ export type WoodParams = {
     cellSize?: number;
     clearcoat?: number;
     clearcoatRoughness?: number;
+    roughness?: number;
+    envMapIntensity?: number;
 };
 
 function hexToRgb01(hex: string): [number, number, number] {
@@ -99,6 +102,8 @@ export function createTriplanarWoodMaterial(params?: Partial<WoodParams>): THREE
             clearcoat,
             clearcoatRoughness,
         });
+        // Base reflection response under IBL (finishes will override)
+        (mat as any).envMapIntensity = 1.0;
         return mat as unknown as THREE.Material;
     } catch (err) {
         // Fallback to legacy TSL material if the addon is unavailable in this three version
@@ -116,6 +121,7 @@ export function createTriplanarWoodMaterial(params?: Partial<WoodParams>): THREE
             roughMin: 0.6,
             roughMax: 0.76,
         });
+        (legacy as any).envMapIntensity = 1.0;
         return legacy;
     }
 }
@@ -146,6 +152,8 @@ export function updateTriplanarWoodMaterial(mat: THREE.Material, params: Partial
         if (params.darkColor) (wm as any).darkGrainColor = new THREE.Color(params.darkColor);
         if (params.clearcoat !== undefined) (wm as any).clearcoat = params.clearcoat;
         if (params.clearcoatRoughness !== undefined) (wm as any).clearcoatRoughness = params.clearcoatRoughness;
+        if (params.roughness !== undefined) (wm as any).roughness = params.roughness as number;
+        if (params.envMapIntensity !== undefined) (wm as any).envMapIntensity = params.envMapIntensity as number;
         (wm as any).needsUpdate = true;
         return;
     }
@@ -157,6 +165,63 @@ export function updateTriplanarWoodMaterial(mat: THREE.Material, params: Partial
     if (p.grainWarp !== undefined) p.warpStrength = p.grainWarp;
     updateWoodNodeMaterialTSL(mat, p);
     // no debug logs
+}
+
+export function getPresetParams(genus: WoodGenus, finish: WoodFinish): Partial<WoodParams> {
+    try {
+        const wm = WoodNodeMaterial.fromPreset(genus, finish) as any;
+        const light = new THREE.Color(wm.lightGrainColor);
+        const dark = new THREE.Color(wm.darkGrainColor);
+        const toHex = (c: THREE.Color) => `#${c.getHexString()}`;
+        const mapped: Partial<WoodParams> = {
+            centerSize: wm.centerSize,
+            largeWarpScale: wm.largeWarpScale,
+            largeGrainStretch: wm.largeGrainStretch,
+            smallWarpStrength: wm.smallWarpStrength,
+            smallWarpScale: wm.smallWarpScale,
+            fineWarpStrength: wm.fineWarpStrength,
+            fineWarpScale: wm.fineWarpScale,
+            ringThickness: wm.ringThickness,
+            ringBias: wm.ringBias,
+            ringSizeVariance: wm.ringSizeVariance,
+            ringVarianceScale: wm.ringVarianceScale,
+            barkThickness: wm.barkThickness,
+            splotchScale: wm.splotchScale,
+            splotchIntensity: wm.splotchIntensity,
+            cellScale: wm.cellScale,
+            cellSize: wm.cellSize,
+            lightColor: toHex(light),
+            darkColor: toHex(dark),
+            clearcoat: wm.clearcoat,
+            clearcoatRoughness: wm.clearcoatRoughness,
+        };
+        // Amplify finish difference for clarity under simple lighting
+        if (finish === 'gloss') {
+            mapped.clearcoat = Math.max(0.8, Math.min(0.85, mapped.clearcoat ?? 0.82));
+            mapped.clearcoatRoughness = Math.max(0.1, mapped.clearcoatRoughness ?? 0.1);
+            mapped.roughness = 0.45;
+            mapped.envMapIntensity = 0.85;
+        } else if (finish === 'semigloss') {
+            mapped.clearcoat = Math.max(0.6, mapped.clearcoat ?? 0.6);
+            mapped.clearcoatRoughness = Math.min(0.2, mapped.clearcoatRoughness ?? 0.2);
+            mapped.roughness = 0.35;
+            mapped.envMapIntensity = 1.3;
+        } else if (finish === 'matte') {
+            mapped.clearcoat = Math.min(mapped.clearcoat ?? 0.2, 0.2);
+            mapped.clearcoatRoughness = Math.max(0.4, mapped.clearcoatRoughness ?? 0.4);
+            mapped.roughness = 0.6;
+            mapped.envMapIntensity = 1.0;
+        } else if (finish === 'raw') {
+            mapped.clearcoat = 0.0;
+            mapped.clearcoatRoughness = Math.max(0.75, mapped.clearcoatRoughness ?? 0.75);
+            mapped.roughness = 0.95;
+            mapped.envMapIntensity = 0.1;
+        }
+        return mapped;
+    } catch {
+        // Fallback: return empty and let caller keep current values
+        return {};
+    }
 }
 
 
