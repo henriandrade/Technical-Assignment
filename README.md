@@ -8,6 +8,8 @@
 docker compose up --build
 ```
 
+https://github.com/user-attachments/assets/d63c8175-4488-4efa-af2e-934b04bb41d7
+
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:3000`
 - Postgres: `localhost:5432` (db `formify`, user `postgres`, password `postgres`)
