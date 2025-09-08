@@ -1,33 +1,84 @@
-Camera Controls Task Plan
+Wood Generator Plan (step-by-step)
 
-Goal: Update camera behavior to a default angled orbit view, auto-framing based on module dimensions, and disable pan/dolly while restoring to default after user interaction.
+Objective
 
-Scope (services/frontend-react)
+- Match the Three.js TSL wood example appearance for "matte white_oak" (`https://threejs.org/examples/webgpu_tsl_wood.html`).
+- Apply the look consistently across all wardrobe parts using our triplanar, world-space shader.
+- Switch renderer to WebGPU with graceful WebGL fallback in `ProductCanvas.tsx`.
 
-1. state/Config.ts
+References
 
-- Add default camera configuration constants (30° azimuth, 60° polar).
-- Export a pure function `frameModuleForCamera(dimensions, aspect, fovDeg)` returning `{ target, position, azimuth, polar, distance }` that centers and frames the object using the default angles.
+- three.js TSL wood example: https://threejs.org/examples/webgpu_tsl_wood.html
+- Wood TSL demo: https://boytchev.github.io/tsl-textures/online/wood.html
+- Wood TSL source: https://github.com/boytchev/tsl-textures/blob/main/src/wood.js
 
-2. scenes/ProductCanvas.tsx
+1. Review current implementation
 
-- Accept a `moduleStore` prop (Zustand) to read dimensions.
-- On mount and when canvas size or dimensions change, compute framing via `frameModuleForCamera` and apply using Drei CameraControls `setLookAt`.
-- Disable pan and dolly: map mouse and touch actions to ROTATE only; disable wheel/pinch.
-- Save state after applying default framing and reset to it on orbit end.
-- Also reset framing after in-app interactions end (when `isInteracting` flips to false).
+- Inspect `services/frontend-react/src/lib/tslmaterials/wood-noise/index.ts` for shader logic and default params.
+- Inspect scene usage in `Column.tsx`, `Shelf.tsx`, `Frame.tsx` for overrides.
+- Inspect `ModuleStore` defaults and `PanelConfigurator` clamps/wiring for `woodParams`.
 
-3. App.tsx
+2. Parameter mapping to white_oak
 
-- Pass the module store instance down to `<ProductCanvas />` via `moduleStore` prop.
+- ringFrequency: controls ring density; map to example’s frequency for white oak.
+- ringSharpness: ring edge hardness; use slightly above 1 for matte white oak.
+- grainScale: overall world scale; tune to reduce pattern size on large parts.
+- grainWarp: FBM-modulated ring warping; keep subtle for white oak.
+- fbmOctaves/gain/lacunarity: match example turbulence feel without heavy cost.
+- lightColor/darkColor: light tan and medium brown typical of white oak.
+- roughMin/roughMax: higher base roughness and limited range for a matte finish.
 
-4. PanelConfigurator
+3. Defaults to apply (matte white_oak)
 
-- No direct changes required; camera reframing is triggered by store `dimensions` changes observed by `ProductCanvas`.
+- ringFrequency: 5.0
+- ringSharpness: 1.6
+- grainScale: 10.0
+- grainWarp: 0.08
+- fbmOctaves: 4
+- fbmGain: 0.5
+- fbmLacunarity: 2.1
+- lightColor: #eadcc6
+- darkColor: #9b7f62
+- roughMin: 0.6
+- roughMax: 0.76
 
-Validation
+4. Code edits
 
-- Default camera starts 30° to side and 30° up, centered on module.
-- Resizing via panel updates camera framing smoothly.
-- Pan and dolly are disabled; orbit ends snap back to default framing.
-- Code follows latest TypeScript + ESLint rules and uses rem in DOM where applicable.
+- Update `createTriplanarWoodMaterial` defaults to values above.
+- Keep `updateTriplanarWoodMaterial` wiring; ensure uniforms update.
+- Remove one-off `{ grainScale: 3.0 }` overrides in `Column.tsx`, `Shelf.tsx`, `Frame.tsx` and rely on store defaults.
+- Add TSL wood API alignment: re-export `WoodNodeMaterial`, `WoodGenuses`, `Finishes` from `three/addons/materials/WoodNodeMaterial.js` in `tslmaterials/wood-noise/index.ts` for parity with the reference.
+- Implement minimal helper `createWoodMaterialFromPreset(genus, finish)` that returns the preset material.
+- Switch `ProductCanvas.tsx` to WebGPU via R3F `gl` prop with fallback and toneMapping parity.
+
+5. Store/UI
+
+- Ensure `createModuleStore` `woodParams` defaults match the values in (3).
+- Keep UI clamps in `PanelConfigurator` (ringSharpness 0–1.0 currently; expand if needed for >1.0 usage).
+- FBM octaves integer; clamp 1–5; default 4.
+- Add optional preset dropdown backed by `WoodGenuses` and `Finishes` to quickly preview looks.
+
+6. Verification
+
+- Visual compare to `white_oak (matte)` in `https://threejs.org/examples/webgpu_tsl_wood.html`.
+- Check consistency across large and thin parts (triplanar scale uniformity).
+- Adjust only if significant drift remains; prefer store defaults rather than per-mesh overrides.
+- Verify WebGPU path runs (if supported) and WebGL fallback renders identically.
+
+7. Follow-ups (if time allows)
+
+- Add preset selector (white_oak, walnut, pine) storing named sets of params.
+- Optional small preview chip via `generateWoodPreview(params)` in panel.
+- Consider switching materials in configurators to use `WoodNodeMaterial.fromPreset` flow when we move fully to TSL nodes.
+
+Progress
+
+- ProductCanvas now initializes WebGPU when available with WebGL fallback, tone mapping set to Neutral (WebGPU) and ACES (WebGL).
+- `tslmaterials/wood-noise/index.ts` re-exports `WoodNodeMaterial`, `WoodGenuses`, and `Finishes` from the Three.js addon and provides a helper to create preset materials. Existing triplanar material kept for backward compatibility.
+- `createTriplanarWoodMaterial` now instantiates official `WoodNodeMaterial` and `updateTriplanarWoodMaterial` updates both official and legacy materials.
+- Store `woodParams` extended with official parameters and defaults aligned with example custom material; `PanelConfigurator` updated to expose controls (centerSize, warp scales, ringBias/variance, bark/splotch, cell, clearcoat) alongside colors and roughness.
+
+Next
+
+- Optionally adopt `WoodNodeMaterial.fromPreset` in configurators to showcase presets grid similar to the reference.
+- Wire a compact GUI or panel controls mapping to store to tweak TSL parameters.

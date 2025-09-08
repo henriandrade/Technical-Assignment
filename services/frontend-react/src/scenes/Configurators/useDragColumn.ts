@@ -10,8 +10,7 @@ export function useDragColumn(store: StoreApi<ModuleStore>, columnId: string) {
 
     const bind = useDrag(({ delta: [dx], first, last, event }) => {
         // Stop events so camera-controls doesn't capture them
-        // @ts-expect-error R3F ThreeEvent typing
-        event?.stopPropagation?.();
+        (event as unknown as { stopPropagation?: () => void })?.stopPropagation?.();
         if (first) {
             setIsInteracting(true);
             // Immediately select the column being dragged

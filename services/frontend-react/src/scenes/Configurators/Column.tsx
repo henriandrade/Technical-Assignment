@@ -1,9 +1,13 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
 import type { ModuleStore } from "@/scenes/createNewConfiguratorModule";
 import * as THREE from "three";
+import {
+  createTriplanarWoodMaterial,
+  updateTriplanarWoodMaterial,
+} from "@/lib/tslmaterials/wood-noise";
 import { useAppStore } from "@/state/App.store";
 
 type Props = {
@@ -25,6 +29,46 @@ function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
     ? useStore(store, (s) => s.selectedId)
     : { type: null, id: null };
   const isInteracting = useAppStore((s) => s.isInteracting);
+  const selectedMaterialKey = store
+    ? useStore(store, (s) => s.selectedMaterialKey)
+    : null;
+  const material = useMemo(() => createTriplanarWoodMaterial(), []);
+  const woodParams = store
+    ? useStore(store, (s) => s.woodParams)
+    : (null as any);
+  useEffect(() => {
+    const isWood =
+      (material as any)?.isWoodNodeMaterial === true ||
+      (material as any)?.constructor?.name?.includes("WoodNodeMaterial");
+    if (!isWood) {
+      updateTriplanarWoodMaterial(material, {
+        relativeUV: true,
+        objectInvSize: [1 / width, 1 / height, 1 / depth],
+      });
+    }
+    if (isWood && woodParams) {
+      const s = Math.max(0.01, woodParams.grainScale ?? 10.0);
+      (material as any).transformationMatrix = new THREE.Matrix4().makeScale(
+        s,
+        s,
+        s
+      );
+      // Subtle random Z offset per-instance to break moiré alignment when viewed at grazing angles
+      const jitter = (id?.length ?? 0) * 0.0003;
+      (material as any).transformationMatrix = (
+        material as any
+      ).transformationMatrix.multiply(
+        new THREE.Matrix4().makeTranslation(0, 0, jitter)
+      );
+      updateTriplanarWoodMaterial(material, woodParams);
+    } else if (woodParams) {
+      updateTriplanarWoodMaterial(material, woodParams);
+    }
+    material.needsUpdate = true;
+    return () => {
+      if ((material as any)?.dispose) (material as any).dispose();
+    };
+  }, [selectedMaterialKey, woodParams, material, width, height, depth]);
   const isHovered =
     isInteractive && !!id && hovered.id === id && hovered.type === "column";
   const isSelected =
@@ -77,7 +121,8 @@ function ColumnImpl({ height, depth, x, width, id, store, gesture }: Props) {
         {...(gesture ?? {})}
       >
         <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial color={color} />
+        {/* Base tint overlay via vertex colors is skipped; instead, modulate env via emissive */}
+        <primitive object={material} attach="material" />
         {outlineColor && outlineGeometry && (
           <lineSegments renderOrder={9999} raycast={() => null}>
             <primitive object={outlineGeometry} />

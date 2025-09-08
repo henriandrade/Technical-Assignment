@@ -99,6 +99,12 @@ export function DraggableInput({
     [value, suffix, precision]
   );
 
+  // Numeric value matching the displayed text (rounded to precision)
+  const displayNumeric = useMemo(
+    () => Number(value.toFixed(precision)),
+    [value, precision]
+  );
+
   // Sync draft when external value changes (outside of render to avoid loops)
   useEffect(() => {
     if (!isEditing) setDraft(String(value));
@@ -133,6 +139,7 @@ export function DraggableInput({
           cursor: isEditing ? "text" : "ew-resize",
           color: "#0f172a",
           userSelect: isEditing ? "text" : "none",
+          position: "relative",
         }}
         title={title ?? "Drag horizontally to change. Double click to type."}
       >
@@ -157,6 +164,51 @@ export function DraggableInput({
         ) : (
           <div style={{ textAlign: "right" }}>{displayValue}</div>
         )}
+        {
+          // Show visual slider track only when bounds are valid
+          (() => {
+            const hasBounds =
+              Number.isFinite(min) && Number.isFinite(max) && max > min;
+            if (!hasBounds) return null;
+            const draftNum = Number(draft);
+            const baseValue =
+              isEditing && !Number.isNaN(draftNum) ? draftNum : displayNumeric;
+            const norm = Math.max(
+              0,
+              Math.min(1, (baseValue - min) / (max - min))
+            );
+            return (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "0.5rem",
+                  right: "0.5rem",
+                  bottom: "1px",
+                  height: "1px",
+                  background: "#cbd5e1",
+                  borderRadius: "0.5px",
+                  pointerEvents: "none",
+                  zIndex: 1,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${norm * 100}%`,
+                    transform: "translateX(-50%)",
+                    top: "-2px",
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: "#475569",
+                    border: "1px solid #f8fafc",
+                    pointerEvents: "none",
+                  }}
+                />
+              </div>
+            );
+          })()
+        }
       </div>
     </div>
   );

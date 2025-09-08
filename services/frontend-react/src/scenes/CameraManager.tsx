@@ -7,7 +7,11 @@ import type { StoreApi } from "zustand";
 import type { ModuleStore } from "@/scenes/createNewConfiguratorModule";
 import { useAppStore } from "@/state/App.store";
 import { DEFAULT_CAMERA_ANGLE } from "@/state/Config";
-const CAMERA_MARGIN = 1.2;
+const CAMERA_MARGIN = 1.08;
+const CAMERA_PADDING = 0.02; // small extra padding to avoid clipping
+const TIGHTEN_FACTOR = 0.72; // nudge ~25% closer relative to previous fit
+const SHIFT_X = 0.2; // shift composition 20% to the left (target right)
+const SHIFT_Y = -0.02; // shift composition 5% up (target down)
 
 export type ModuleLikeDimensions = {
   width: number;
@@ -83,12 +87,13 @@ export default function CameraManager({ moduleStore }: Props) {
     if (!box.isEmpty()) {
       box.getCenter(center);
       box.getSize(sizeV);
-      const radius = sizeV.length() * 0.5;
+      // Fit using bounding sphere for robustness across rotations
+      const radius = sizeV.length() * 0.5 * (1 + CAMERA_PADDING);
       const vFov = THREE.MathUtils.degToRad(fov);
       const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
       const distV = radius / Math.sin(vFov / 2);
       const distH = radius / Math.sin(hFov / 2);
-      const distance = Math.max(distV, distH) * CAMERA_MARGIN;
+      const distance = Math.max(distV, distH) * CAMERA_MARGIN * TIGHTEN_FACTOR;
       const polar = THREE.MathUtils.degToRad(DEFAULT_CAMERA_ANGLE.polarDeg);
       const azimuth = THREE.MathUtils.degToRad(DEFAULT_CAMERA_ANGLE.azimuthDeg);
       const sinPhi = Math.sin(polar);
@@ -102,8 +107,8 @@ export default function CameraManager({ moduleStore }: Props) {
         px,
         py,
         pz,
-        center.x,
-        center.y,
+        center.x + sizeV.x * SHIFT_X,
+        center.y + sizeV.y * SHIFT_Y,
         center.z,
         smooth
       );

@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import { createModuleStore, type ModuleStore } from "@/scenes/createNewConfiguratorModule";
+import { generateWoodPreview } from "@/lib/tslmaterials/wood-noise";
 
 export type DoorType = "hinge" | "sliding" | "open";
 
@@ -32,6 +33,14 @@ export function createWardrobeStore(): StoreApi<WardrobeStore> {
             { id: crypto.randomUUID(), y: 1.1 },
         ],
     }) as StoreApi<WardrobeStore>;
+
+    // Register initial materials
+    const woodThumb = typeof document !== 'undefined' ? generateWoodPreview(64) : undefined;
+    base.getState().registerMaterial("wood-noise", {
+        name: "Procedural Wood",
+        mapUrl: woodThumb ?? undefined,
+    });
+    base.getState().setSelectedMaterial("wood-noise");
 
     // Augment base store with wardrobe-only state and actions
     base.setState({ doors: [] } as Partial<WardrobeStore>);

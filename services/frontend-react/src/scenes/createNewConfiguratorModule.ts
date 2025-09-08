@@ -22,7 +22,44 @@ export interface ModuleState {
     dimensions: ModuleDimensions;
     columns: ModuleColumn[];
     shelves: ModuleShelf[];
-    materials: Record<string, { name: string; color?: string; mapUrl?: string }>;
+    materials: Record<string, { name: string; color?: string; mapUrl?: string | undefined }>;
+    selectedMaterialKey: string | null;
+    woodParams: {
+        // Legacy/simple controls
+        ringFrequency: number;
+        ringSharpness: number;
+        ringThickness?: number;
+        grainScale: number;
+        grainWarp: number;
+        fbmOctaves: number;
+        fbmGain: number;
+        fbmLacunarity: number;
+        poreScale?: number;
+        poreStrength?: number;
+        lightColor: string; // hex css
+        darkColor: string; // hex css
+        roughMin: number;
+        roughMax: number;
+
+        // WoodNodeMaterial extended controls
+        centerSize?: number;
+        largeWarpScale?: number;
+        largeGrainStretch?: number;
+        smallWarpStrength?: number;
+        smallWarpScale?: number;
+        fineWarpStrength?: number;
+        fineWarpScale?: number;
+        ringBias?: number;
+        ringSizeVariance?: number;
+        ringVarianceScale?: number;
+        barkThickness?: number;
+        splotchScale?: number;
+        splotchIntensity?: number;
+        cellScale?: number;
+        cellSize?: number;
+        clearcoat?: number;
+        clearcoatRoughness?: number;
+    };
     hoveredId: { type: "shelf" | "column" | null; id: string | null };
     selectedId: { type: "shelf" | "column" | null; id: string | null };
 }
@@ -37,7 +74,9 @@ export interface ModuleActions {
     addShelf: (atY?: number) => void;
     removeShelf: (id: string) => void;
     moveShelf: (id: string, nextY: number) => void;
-    registerMaterial: (key: string, def: { name: string; color?: string; mapUrl?: string }) => void;
+    registerMaterial: (key: string, def: { name: string; color?: string; mapUrl?: string | undefined }) => void;
+    setSelectedMaterial: (key: string) => void;
+    setWoodParams: (next: Partial<ModuleState["woodParams"]>) => void;
     setHovered: (payload: { type: "shelf" | "column" | null; id: string | null }) => void;
     setSelected: (payload: { type: "shelf" | "column" | null; id: string | null }) => void;
 }
@@ -60,6 +99,43 @@ export function createModuleStore(options: ModuleOptions) {
         columns: options.columns ?? [],
         shelves: options.shelves ?? [],
         materials: options.materials ?? {},
+        selectedMaterialKey: (options as any)?.selectedMaterialKey ?? null,
+        woodParams: (options as any)?.woodParams ?? {
+            // White oak inspired defaults matching Three.js TSL example (legacy fields)
+            ringFrequency: 5.0,
+            ringSharpness: 1.6,
+            ringThickness: 0.35,
+            grainScale: 10.0,
+            grainWarp: 0.08,
+            fbmOctaves: 4,
+            fbmGain: 0.5,
+            fbmLacunarity: 2.1,
+            poreScale: 18.0,
+            poreStrength: 0.12,
+            lightColor: "#926c50",
+            darkColor: "#0c0504",
+            roughMin: 0.6,
+            roughMax: 0.76,
+
+            // Extended defaults mirrored from example custom material
+            centerSize: 1.11,
+            largeWarpScale: 0.32,
+            largeGrainStretch: 0.24,
+            smallWarpStrength: 0.059,
+            smallWarpScale: 2,
+            fineWarpStrength: 0.006,
+            fineWarpScale: 32.8,
+            ringBias: 0.03,
+            ringSizeVariance: 0.03,
+            ringVarianceScale: 4.4,
+            barkThickness: 0.3,
+            splotchScale: 0.2,
+            splotchIntensity: 0.541,
+            cellScale: 910,
+            cellSize: 0.1,
+            clearcoat: 1,
+            clearcoatRoughness: 0.2,
+        },
         hoveredId: { type: null, id: null },
         selectedId: { type: null, id: null },
 
@@ -231,6 +307,11 @@ export function createModuleStore(options: ModuleOptions) {
 
         registerMaterial: (key, def) =>
             set((state) => ({ materials: { ...state.materials, [key]: def } })),
+
+        setSelectedMaterial: (key) => set({ selectedMaterialKey: key }),
+
+        setWoodParams: (next) =>
+            set((state) => ({ woodParams: { ...state.woodParams, ...next } })),
 
         setHovered: (payload) => set({ hoveredId: payload }),
         setSelected: (payload) => set({ selectedId: payload }),

@@ -20,10 +20,16 @@ export function WardrobeConfigurator({ store: externalStore }: Props) {
   if (!storeRef.current) storeRef.current = createWardrobeStore();
   const store = storeRef.current;
   const dimensions = useStore(store, (s) => s.dimensions);
-  const columns = useStore(store, (s) => s.columns, shallow);
-  const shelves = useStore(store, (s) => s.shelves, shallow);
-  const columnIds = useMemo(() => columns.map((c) => c.id), [columns]);
-  const shelfIds = useMemo(() => shelves.map((sh) => sh.id), [shelves]);
+  const columns = useStore(store, (s) => s.columns);
+  const shelves = useStore(store, (s) => s.shelves);
+  const columnIds = useMemo(
+    () => columns.map((c: { id: string }) => c.id),
+    [columns]
+  );
+  const shelfIds = useMemo(
+    () => shelves.map((sh: { id: string }) => sh.id),
+    [shelves]
+  );
 
   // Reset cursor on unmount
   useEffect(() => {
@@ -48,6 +54,7 @@ export function WardrobeConfigurator({ store: externalStore }: Props) {
         height={dimensions.height}
         depth={dimensions.depth}
         thickness={0.02}
+        store={store}
       />
 
       {/* Internal dividers */}

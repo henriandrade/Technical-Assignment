@@ -7,12 +7,14 @@ services:
     build:
       context: ./services/frontend-react
       dockerfile: ../../infra/docker/Dockerfile.frontend
-    command: bun run dev
+    command: sh -c "bun install && bun run dev"
     ports:
       - "${WEB_PORT:-5173}:5173"
     environment:
       - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
       - VITE_HOST=0.0.0.0
+      - VITE_ENABLE_WEBGPU=${VITE_ENABLE_WEBGPU:-true}
+      - CHOKIDAR_USEPOLLING=true
     working_dir: /usr/src/app
     volumes:
       - ./services/frontend-react:/usr/src/app:delegated
@@ -26,7 +28,7 @@ services:
     build:
       context: ./services/backend-express
       dockerfile: ../../infra/docker/Dockerfile.backend
-    command: bun run dev
+    command: sh -c "bun install && bun run dev"
     ports:
       - "${API_PORT:-3000}:3000"
     environment:
