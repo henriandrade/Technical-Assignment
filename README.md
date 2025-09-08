@@ -12,12 +12,7 @@ docker compose up --build
 - API: `http://localhost:3000`
 - Postgres: `localhost:5432` (db `formify`, user `postgres`, password `postgres`)
 
-### Demo
-
-<video src="./demoVideo.mp4" controls style="max-width: 100%; height: auto;">
-</video>
-
-If inline playback is not available, download or view the file directly: [demoVideo.mp4](./demoVideo.mp4)
+./demoVideo.mp4
 
 This repository implements a 3D product configurator focused on realistic wood materials, with state snapshot save/restore and a typed backend API. The work was completed in roughly 24+ hours.
 
