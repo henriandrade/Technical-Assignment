@@ -18,8 +18,9 @@ function FrontViewSVGImpl({
   frameThickness = 0.02,
   shelfThickness = 0.02,
 }: Props) {
+  // Maintain true aspect by scaling to a fixed max width while computing height from real dimensions
   const W = 300;
-  const H = 220;
+  const H = Math.max(1, Math.round((height / width) * W));
   const sx = (x: number) => (x / width) * W;
   const sy = (y: number) => H - (y / height) * H;
   const pxT = (t: number) => (t / height) * H;

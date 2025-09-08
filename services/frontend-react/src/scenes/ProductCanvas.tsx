@@ -10,10 +10,11 @@ import WebGPU from "three/addons/capabilities/WebGPU.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import { WebGPURenderer } from "three/webgpu";
-import { SoftShadows, Environment } from "@react-three/drei";
+import { SoftShadows, Environment, Stats } from "@react-three/drei";
 import type { StoreApi } from "zustand";
 import type { ModuleStore } from "@/scenes/createNewConfiguratorModule";
 import CameraManager from "@/scenes/CameraManager";
+import { canvasElementRef } from "@/scenes/canvasRef";
 
 type Props = PropsWithChildren & {
   onPointerMissed?: (event: MouseEvent) => void;
@@ -51,9 +52,24 @@ export default function ProductCanvas({
   // Prefer WebGPU automatically when available
   const isWebGPU = useMemo(() => avail, [avail]);
   const [backendLabel, setBackendLabel] = useState<"WebGPU" | "WebGL">("WebGL");
+  function StatsBottomLeft() {
+    useEffect(() => {
+      const el = document.querySelector(".r3f-stats-bl") as HTMLElement | null;
+      if (el) {
+        el.style.position = "fixed";
+        el.style.top = "auto";
+        el.style.left = "0.5rem";
+        el.style.bottom = "0.5rem";
+        el.style.right = "auto";
+        el.style.zIndex = "10";
+      }
+    }, []);
+    return <Stats className="r3f-stats-bl" showPanel={0} />;
+  }
   // camera logic moved into CameraManager
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
+      <StatsBottomLeft />
       <Canvas
         camera={{ fov: 45, near: 0.1, far: 100 }}
         shadows
@@ -62,6 +78,7 @@ export default function ProductCanvas({
           const canvas = (
             defaultProps as unknown as { canvas?: HTMLCanvasElement }
           ).canvas;
+          canvasElementRef.current = canvas ?? null;
           if (isWebGPU) {
             try {
               const renderer = new WebGPURenderer({ canvas, antialias: true });
@@ -73,14 +90,18 @@ export default function ProductCanvas({
               // fall through to WebGL
             }
           }
-          const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+          const renderer = new THREE.WebGLRenderer({
+            canvas,
+            antialias: true,
+            preserveDrawingBuffer: true,
+          });
           renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
           renderer.shadowMap.enabled = true;
           (renderer as any).physicallyCorrectLights = true;
           (renderer as any).__backend = "WebGL";
           return renderer;
         }}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, size, events }) => {
           // Configure tone mapping after renderer is attached
           const anyGl = gl as unknown as WebGPURenderer | THREE.WebGLRenderer;
           const createdIsWebGPU =
@@ -102,6 +123,13 @@ export default function ProductCanvas({
             (anyGl as THREE.WebGLRenderer).toneMapping =
               THREE.ACESFilmicToneMapping;
             (anyGl as THREE.WebGLRenderer).toneMappingExposure = 1.0;
+          }
+          // Ensure canvasRef dimensions are up-to-date for snapshot
+          const canvas = (gl as any).domElement as
+            | HTMLCanvasElement
+            | undefined;
+          if (canvas) {
+            canvasElementRef.current = canvas;
           }
           // Drei <Environment> will manage IBL/background in the scene tree
         }}

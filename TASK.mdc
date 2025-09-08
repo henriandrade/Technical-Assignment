@@ -1,100 +1,135 @@
-Wood Generator – New Requirements Plan (step-by-step)
+Part 3 – Backend API: Save/Load Configurator States (step-by-step plan)
 
 Objective
 
-- Achieve full presets parity with the official three.js WebGPU TSL wood demo presets (genuses × finishes).
-- Update the configurator UI: show a 4×10 presets grid with thumbnails, and move advanced sliders into a collapsible section (collapsed by default).
-- Default selection should be matte white_oak, matching the current look.
+- Persist and manage versions of configurator states in the backend (Postgres via Express).
+- In `PanelConfigurator.tsx`, add a “Saved states” section with a thumbnail grid (like the material presets) to save, load, rename, and delete.
+- Define a Zod schema and JSON template for serializing/deserializing all parameters present in `PanelConfigurator.tsx`/`createNewConfiguratorModule.ts` (dimensions, shelves/columns, thicknesses, material details, presets selection, wood parameters).
 
 References
 
-- three.js TSL wood example: https://threejs.org/examples/webgpu_tsl_wood.html
+- Monorepo layout and dev flow in `README.mdc`.
+- Store shape in `services/frontend-react/src/scenes/createNewConfiguratorModule.ts`.
+- Panel UI in `services/frontend-react/src/layout/PanelConfigurator.tsx`.
 
-Scope
+Scope (files impacted)
 
-- Files mainly impacted:
-  - `services/frontend-react/src/lib/tslmaterials/wood-noise/presets.ts`
-  - `services/frontend-react/src/lib/tslmaterials/wood-noise/index.ts`
-  - `services/frontend-react/src/layout/PanelConfigurator.tsx`
-  - Store where `woodParams` live (`createNewConfiguratorModule.ts`)
+- Backend (Express):
+  - `services/backend-express/src/schemas/configuratorState.ts`
+  - `services/backend-express/src/db/client.ts`
+  - `services/backend-express/src/db/migrations/001_init.sql` (or auto-create on boot)
+  - `services/backend-express/src/controllers/states.controller.ts`
+  - `services/backend-express/src/routes/states.routes.ts`
+- Frontend (React):
+  - `services/frontend-react/src/api/states.ts`
+  - `services/frontend-react/src/scenes/serialize.ts` (serialize/deserialize helpers)
+  - `services/frontend-react/src/layout/PanelConfigurator.tsx` (new Saved states section)
+  - Optional: `services/frontend-react/src/state/SavedStates.store.ts` (client cache)
 
-Presets parity in tslmaterials
+Data model (Postgres)
 
-1. Reuse official types and lists
+- Table: `configurator_states`
+  - `id` UUID primary key (default gen_random_uuid())
+  - `name` TEXT NOT NULL
+  - `thumbnail_data_url` TEXT NULL (PNG data URL; small preview ~12–40KB)
+  - `state` JSONB NOT NULL (validated by Zod; see schema below)
+  - `created_at` TIMESTAMPTZ DEFAULT now()
+  - `updated_at` TIMESTAMPTZ DEFAULT now()
+  - Index on `created_at DESC`
 
-   - Import/re-export `WoodNodeMaterial`, `WoodGenuses`, `Finishes` from `three/addons/materials/WoodNodeMaterial.js` (already re-exported in `index.ts`).
-   - Define `type WoodGenus` and `type WoodFinish` using the official types.
+Zod schema (shared shape mirrors ModuleState)
 
-2. Add preset access helpers
+- Backend: `ConfiguratorStateZ` to validate request/response bodies:
+  - `version` string (e.g., "1") for future migrations
+  - `dimensions`: `{ width: number; height: number; depth: number }`
+  - `columns`: `Array<{ id: string; x: number; width: number }>`
+  - `shelves`: `Array<{ id: string; y: number }>`
+  - `columnThickness`: number
+  - `shelfThickness`: number
+  - `frameThickness`: number
+  - `materials`: `Record<string, { name: string; color?: string; mapUrl?: string | null }>`
+  - `selectedMaterialKey`: `string | null`
+  - `woodParams`: full object as in `ModuleState` (include all numeric controls + `lightColor`/`darkColor`)
+  - `selectedGenus`: string (from `WoodGenuses`)
+  - `selectedFinish`: string (from `Finishes`)
+  - `hoveredId`: `{ type: 'shelf' | 'column' | null; id: string | null }`
+  - `selectedId`: `{ type: 'shelf' | 'column' | null; id: string | null }`
 
-   - Add `getOfficialPresetParams(genus: WoodGenus, finish: WoodFinish)` that returns a normalized parameters object we can map to our `woodParams` (string colors converted to linear RGB triplets when needed).
-   - Add `createOfficialWoodMaterial(genus: WoodGenus, finish: WoodFinish)` that calls `WoodNodeMaterial.fromPreset(genus, finish)` and applies finish-specific overrides from store (e.g., `clearcoat`, `clearcoatRoughness`).
+API design (Express)
 
-3. Populate all presets
+- Base URL: `${VITE_API_URL}/api/states`
+- Endpoints:
+  - `GET /api/states?limit=24&offset=0&query=foo` → list summaries `{ id, name, thumbnail_data_url, created_at }`
+  - `GET /api/states/:id` → full `{ id, name, thumbnail_data_url, state }`
+  - `POST /api/states` → create `{ name: string; thumbnail_data_url?: string; state: ConfiguratorStateZ }`
+  - `PUT /api/states/:id` → update `{ name?: string; thumbnail_data_url?: string; state?: ConfiguratorStateZ }`
+  - `DELETE /api/states/:id` → delete
+- Validate request bodies and responses with Zod; return 400 on validation errors.
 
-   - Genuses (columns, 10): `teak`, `walnut`, `white_oak`, `pine`, `poplar`, `maple`, `red_oak`, `cherry`, `cedar`, `mahogany`.
-   - Finishes (rows, 4): `gloss`, `semigloss`, `matte`, `raw`.
-   - Export a structure such as `AllWoodPresets: { [finish in WoodFinish]: { [genus in WoodGenus]: Preset } }` to power the grid.
+Backend steps
 
-4. Mapping to our legacy TSL material (if used)
-   - Implement a mapping function from official `WoodParameters` to our `WoodNodeParams` used by `material.ts`/`nodes.ts` to keep both paths in sync.
-   - Ensure color conversion and parameter naming differences are handled (e.g., `lightGrainColor`/`darkGrainColor`, warp/ring controls).
+1. Create Zod schema `ConfiguratorStateZ` under `src/schemas/` (TypeScript export types for API).
+2. Add DB client (`pg`) and ensure `DATABASE_URL` wired (already via Compose). Auto-run a simple `CREATE TABLE IF NOT EXISTS` at boot or add a migration SQL.
+3. Implement controller functions: `listStates`, `getState`, `createState`, `updateState`, `deleteState` with input/output validation and parameterized queries.
+4. Mount routes under `/api/states` in Express app; include JSON error handler returning consistent shape.
+5. Optional: add simple rate-limit/cors if needed for local dev.
 
-Thumbnails for presets
+Frontend serialization helpers
 
-5. Implement preview generation and caching
-   - Implement `getPresetThumbnail(genus, finish)` that creates a 64–96 px PNG data URL per preset via a small offscreen three.js render using `WoodNodeMaterial.fromPreset` on a simple plane/box, tone mapping matched to the canvas.
-   - Cache by key `${finish}:${genus}` in-memory to avoid recomputation on re-render.
-   - SSR-safe: only generate in the browser after mount; show a neutral placeholder until ready.
+6. Implement `serializeModuleStore(store: StoreApi<ModuleStore>): ConfiguratorState`:
+   - Read everything from the store (`dimensions`, `columns`, `shelves`, thicknesses, `materials`, `selectedMaterialKey`, `woodParams`, `selectedGenus`, `selectedFinish`, `hoveredId`, `selectedId`).
+   - Include `version: '1'`.
+7. Implement `applySerializedState(state: ConfiguratorState, store)`: set dimensions, set thicknesses, set shelves/columns, set materials selections, set wood values, and selection.
 
-Store updates
+Thumbnail generation (client)
 
-6. Extend store to track selection and apply presets
-   - Add `selectedGenus: WoodGenus` and `selectedFinish: WoodFinish` with defaults `white_oak` and `matte`.
-   - Add `applyPreset(genus, finish)` that:
-     - Updates `selectedGenus`/`selectedFinish`.
-     - Updates `woodParams` to the official preset params (mapped to our material path) and applies finish-related surface options (`clearcoat`, `clearcoatRoughness`, `clearcoatDarken`).
-   - Keep all existing individual `woodParams` fields to allow advanced overrides post-preset.
+8. Generate a small data URL preview when saving:
+   - Use the existing `FrontViewSVG` with current store values rendered to an offscreen `<svg>` and call `new XMLSerializer().serializeToString(svg)`, then wrap as `data:image/svg+xml;base64,...` OR rasterize to PNG via a temporary `<canvas>` for more consistent thumbnails.
+   - Target preview size ≈ 160×100 px; keep bytes minimal.
 
-PanelConfigurator UI
+PanelConfigurator UI – Saved states section
 
-7. Presets grid (top of the wood section)
+9. Add a new section above the wood presets (or just below it):
+   - Header: “Saved states”.
+   - Grid (CSS grid with `rem` sizing) of thumbnails (rows wrap). Each cell shows:
+     - Thumbnail image
+     - Name (truncate)
+     - Actions: Load (primary on click), small Delete (✕) button; optional Rename inline.
+   - Active snapshot highlights like material presets.
+10. Controls:
 
-   - Above the sliders, render a 4×10 grid of thumbnails: rows = `gloss`, `semigloss`, `matte`, `raw`; columns = the 10 genuses listed above.
-   - Each cell shows the thumbnail + a small label (genus). Row headers show finishes. Use rem units and CSS grid.
-   - Clicking a cell calls `applyPreset(genus, finish)`. The currently selected cell is highlighted with a focus ring and an active border.
-   - Accessibility: each cell is a button with `aria-pressed` and keyboard navigation (arrow keys move focus within the grid; Enter/Space selects).
+- “Save current as…” button → opens small inline input (name) + Save. On save: serialize store → POST `/api/states` with `name`, `thumbnail_data_url`, `state`.
+- “Update” available when a saved state is currently loaded → PUT with new state + regenerated thumbnail.
+- Delete button on card → DELETE.
 
-8. Advanced sliders in a collapsible container
+11. Data loading:
 
-   - Wrap the existing wood generator sliders in a `<details>`/`<summary>` or custom collapse component, default collapsed. Summary text: "Advanced wood generator".
-   - Maintain the current grid layout for sliders. Keep all clamps and steps as-is. Respect `rem` units.
+- On mount, fetch `GET /api/states?limit=48` and display. Debounce rename updates.
+- Clicking a card loads full by `GET /api/states/:id`, then `applySerializedState`.
 
-9. Default selection and first render
-   - On init, set default to `matte` + `white_oak` (current behavior). Ensure the initial material reflects the preset before any manual slider changes.
+Types & validation
 
-Material application path
+12. Duplicate the Zod schema on the frontend or derive from a typed module (keep schemas in-sync manually for now). Validate responses before applying.
 
-10. Material handling
+Migrations & env
 
-- If using the official material: instantiate via `WoodNodeMaterial.fromPreset(selectedGenus, selectedFinish)` and apply store finish tweaks.
-- If using our legacy TSL material: map official params via the adapter and call `updateWoodNodeMaterialTSL` with the mapped fields.
+13. Add SQL migration or boot-time DDL in backend; document in README that Compose will provision the table.
+14. Ensure `.env` has `VITE_API_URL` and backend has `DATABASE_URL` (already in repo). Compose runs both.
 
-Validation and polish
+Testing & QA
 
-11. Visual checks
+15. Manual flow:
 
-- Compare our `matte white_oak` to the three.js demo for basic parity.
-- Sample a few combinations (e.g., `gloss teak`, `semigloss walnut`, `raw maple`) and verify thumbnails match viewport results.
+- Start Docker: `docker compose up --build`.
+- Create shelves/columns, change sizes/materials, save snapshot, reload page → snapshot appears; click to load back; rename/delete; update.
 
-12. UX/QA
+16. Validation:
 
-- Grid performance (thumbnail caching working, no layout thrash).
-- Keyboard and screen reader usability of the grid and the collapsible section.
-- ESLint/TypeScript clean; no implicit any; strict null checks.
+- Zod rejects malformed payloads. API returns 400 with issues.
+- ESLint/TS clean; use `rem` units in UI.
 
-Outcomes
+Outcome
 
-- A complete presets grid (4×10) aligned with the official demo.
-- Collapsible advanced controls, collapsed by default.
-- Default preset is `matte` + `white_oak`.
+- Backend can persist multiple named versions with thumbnails.
+- Frontend “Saved states” grid enables save/load/rename/delete.
+- JSON format (Zod-validated) covers all configurator parameters for reliable restore.

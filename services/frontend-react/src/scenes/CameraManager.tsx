@@ -60,7 +60,7 @@ type Props = {
 export default function CameraManager({ moduleStore }: Props) {
   const isInteracting = useAppStore((s) => s.isInteracting);
   const controlsRef = useRef<CameraControls | null>(null);
-  const { camera, size, scene } = useThree();
+  const { camera, size, scene, gl } = useThree();
   const aspect = size.width / size.height;
   const fov = (camera as any).fov ?? 50;
 
@@ -113,6 +113,8 @@ export default function CameraManager({ moduleStore }: Props) {
         smooth
       );
       controlsRef.current.saveState();
+      // Ensure renderer updates before we potentially snapshot next frame
+      gl?.render(scene, camera as any);
     } else {
       const dims = moduleStore?.getState().dimensions ?? {
         width: 1.8,
@@ -130,6 +132,7 @@ export default function CameraManager({ moduleStore }: Props) {
         smooth
       );
       controlsRef.current.saveState();
+      gl?.render(scene, camera as any);
     }
   };
 
@@ -159,11 +162,47 @@ export default function CameraManager({ moduleStore }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleStore, aspect, fov]);
 
+  // Also reframe when columns/shelves or thicknesses change (e.g., after loading a snapshot)
+  useEffect(() => {
+    if (!moduleStore) return;
+    const selectSignature = () => {
+      const s = moduleStore.getState();
+      // capture geometry-affecting state
+      const cols = s.columns
+        .map((c) => `${c.id}:${c.x.toFixed(5)}:${c.width.toFixed(5)}`)
+        .join("|");
+      const shelves = s.shelves
+        .map((sh) => `${sh.id}:${sh.y.toFixed(5)}`)
+        .join("|");
+      return `${cols}#${shelves}#${(s.frameThickness ?? 0).toFixed(5)}#${(
+        s.columnThickness ?? 0
+      ).toFixed(5)}#${(s.shelfThickness ?? 0).toFixed(5)}`;
+    };
+    let lastSig = selectSignature();
+    const unsub = moduleStore.subscribe(() => {
+      const nextSig = selectSignature();
+      if (nextSig !== lastSig) {
+        lastSig = nextSig;
+        frame(true);
+      }
+    });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleStore, aspect, fov]);
+
   // When app-level interactions stop, reframe again to settle view
   useEffect(() => {
     if (!isInteracting) frame(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isInteracting]);
+
+  // Allow external triggers (e.g., after loading a snapshot) to force a reframe
+  useEffect(() => {
+    const onReframe = () => frame(true);
+    window.addEventListener("reframeCamera", onReframe);
+    return () => window.removeEventListener("reframeCamera", onReframe);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <CameraControls

@@ -4,7 +4,7 @@
   "type": "module",
   "version": "0.0.0",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "bun --hot src/index.ts",
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty",
     "lint": "eslint ."
